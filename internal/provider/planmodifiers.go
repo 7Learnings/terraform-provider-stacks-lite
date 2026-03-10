@@ -44,8 +44,21 @@ func (m *mapPlanModifier) PlanModifyMap(ctx context.Context, req planmodifier.Ma
 		}
 	}
 
-	planPath := pd.PlanPath(stack.ValueString())
-	tflog.Debug(ctx, fmt.Sprintf("Reading plan outputs from %s", planPath))
+	stackDir := pd.StackDirectoryPath(stack.ValueString())
+	if _, err := os.Stat(stackDir); err != nil {
+		if os.IsNotExist(err) {
+			resp.Diagnostics.AddError("Upstream stack directory not found", fmt.Sprintf("Stack directory %q does not exist in stacks root %q", stack.ValueString(), pd.StacksRoot))
+		} else {
+			resp.Diagnostics.AddError("Error accessing upstream stack directory", fmt.Sprintf("Failed to access stack directory %q: %v", stackDir, err))
+		}
+		return
+	}
+
+	planPath := pd.PlanPath(stackDir)
+	tflog.Debug(ctx, "reading upstream plan outputs", map[string]interface{}{
+		"path":  planPath,
+		"stack": stack.ValueString(),
+	})
 
 	data, err := os.ReadFile(planPath)
 	if err != nil {

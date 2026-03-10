@@ -90,7 +90,7 @@ func (r *StacksResource) Create(ctx context.Context, req resource.CreateRequest,
 		return
 	}
 
-	outputs, err := r.readApplyOutputs(plan.Stack.ValueString())
+	outputs, err := r.readApplyOutputs(ctx, plan.Stack.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError("Error reading upstream apply outputs", err.Error())
 		return
@@ -110,7 +110,7 @@ func (r *StacksResource) Read(ctx context.Context, req resource.ReadRequest, res
 		return
 	}
 
-	outputs, err := r.readApplyOutputs(state.Stack.ValueString())
+	outputs, err := r.readApplyOutputs(ctx, state.Stack.ValueString())
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return
@@ -134,7 +134,7 @@ func (r *StacksResource) Update(ctx context.Context, req resource.UpdateRequest,
 		return
 	}
 
-	outputs, err := r.readApplyOutputs(plan.Stack.ValueString())
+	outputs, err := r.readApplyOutputs(ctx, plan.Stack.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError("Error reading upstream apply outputs", err.Error())
 		return
@@ -149,13 +149,24 @@ func (r *StacksResource) Update(ctx context.Context, req resource.UpdateRequest,
 func (r *StacksResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
 }
 
-func (r *StacksResource) readApplyOutputs(stack string) (types.Map, error) {
+func (r *StacksResource) readApplyOutputs(ctx context.Context, stack string) (types.Map, error) {
 	if r.providerData == nil {
 		return types.MapNull(types.StringType), fmt.Errorf("provider data not configured")
 	}
 
-	outputPath := r.providerData.OutputsPath(stack)
-	tflog.Debug(context.Background(), fmt.Sprintf("Reading apply outputs from %s", outputPath))
+	stackDir := r.providerData.StackDirectoryPath(stack)
+	if _, err := os.Stat(stackDir); err != nil {
+		if os.IsNotExist(err) {
+			return types.MapNull(types.StringType), fmt.Errorf("stack directory %q does not exist in stacks root %q: %w", stack, r.providerData.StacksRoot, err)
+		}
+		return types.MapNull(types.StringType), fmt.Errorf("failed to access stack directory %q: %w", stackDir, err)
+	}
+
+	outputPath := r.providerData.OutputsPath(stackDir)
+	tflog.Debug(ctx, "reading apply outputs", map[string]interface{}{
+		"path":  outputPath,
+		"stack": stack,
+	})
 
 	data, err := os.ReadFile(outputPath)
 	if err != nil {

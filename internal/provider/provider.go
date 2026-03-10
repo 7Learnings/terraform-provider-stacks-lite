@@ -37,12 +37,16 @@ type StacksLiteProviderData struct {
 	Env        string
 }
 
-func (d *StacksLiteProviderData) PlanPath(stack string) string {
-	return filepath.Join(d.StacksRoot, stack, d.Env, "tfplan.json")
+func (d *StacksLiteProviderData) StackDirectoryPath(stack string) string {
+	return filepath.Join(d.StacksRoot, stack)
 }
 
-func (d *StacksLiteProviderData) OutputsPath(stack string) string {
-	return filepath.Join(d.StacksRoot, stack, d.Env, "outputs.json")
+func (d *StacksLiteProviderData) PlanPath(stackDir string) string {
+	return filepath.Join(stackDir, d.Env, "tfplan.json")
+}
+
+func (d *StacksLiteProviderData) OutputsPath(stackDir string) string {
+	return filepath.Join(stackDir, d.Env, "outputs.json")
 }
 
 type Plan struct {
