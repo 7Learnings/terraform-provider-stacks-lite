@@ -22,6 +22,7 @@ provider_installation {
 }
 EOF
 
+export STACKS_ROOT=..
 # test planning through both stacks
 cd upstream/
 tofu init

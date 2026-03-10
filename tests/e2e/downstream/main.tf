@@ -7,7 +7,7 @@ terraform {
 }
 
 resource "stacks" "upstream" {
-  stack = "../upstream"
+  stack = "upstream"
 }
 
 output "random" {

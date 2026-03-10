@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -13,30 +12,19 @@ import (
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
-type Plan struct {
-	PlannedValues PlannedValues `json:"planned_values"`
+type mapPlanModifier struct {
+	providerData *StacksLiteProviderData
 }
 
-type PlannedValues struct {
-	Outputs map[string]OutputValue `json:"outputs"`
-}
-
-type OutputValue struct {
-	Value     interface{} `json:"value"`
-	Sensitive bool        `json:"sensitive"`
-}
-
-type mapPlanModifier struct{}
-
-func (m mapPlanModifier) Description(ctx context.Context) string {
+func (m *mapPlanModifier) Description(ctx context.Context) string {
 	return "Reads upstream plan outputs and populates the plan with known values."
 }
 
-func (m mapPlanModifier) MarkdownDescription(ctx context.Context) string {
+func (m *mapPlanModifier) MarkdownDescription(ctx context.Context) string {
 	return m.Description(ctx)
 }
 
-func (m mapPlanModifier) PlanModifyMap(ctx context.Context, req planmodifier.MapRequest, resp *planmodifier.MapResponse) {
+func (m *mapPlanModifier) PlanModifyMap(ctx context.Context, req planmodifier.MapRequest, resp *planmodifier.MapResponse) {
 	var stack types.String
 	diags := req.Plan.GetAttribute(ctx, req.Path.ParentPath().AtName("stack"), &stack)
 	resp.Diagnostics.Append(diags...)
@@ -48,7 +36,15 @@ func (m mapPlanModifier) PlanModifyMap(ctx context.Context, req planmodifier.Map
 		return
 	}
 
-	planPath := filepath.Join(stack.ValueString(), "tfplan.json")
+	pd := m.providerData
+	if pd == nil {
+		pd = &StacksLiteProviderData{
+			StacksRoot: os.Getenv("STACKS_ROOT"),
+			Env:        os.Getenv("STACKS_ENV"),
+		}
+	}
+
+	planPath := pd.PlanPath(stack.ValueString())
 	tflog.Debug(ctx, fmt.Sprintf("Reading plan outputs from %s", planPath))
 
 	data, err := os.ReadFile(planPath)
@@ -114,6 +110,6 @@ func (m mapPlanModifier) PlanModifyMap(ctx context.Context, req planmodifier.Map
 	resp.Diagnostics.Append(diags...)
 }
 
-func newMapPlanModifier() planmodifier.Map {
-	return mapPlanModifier{}
+func newMapPlanModifier() *mapPlanModifier {
+	return &mapPlanModifier{}
 }

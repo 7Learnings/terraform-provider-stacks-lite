@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -22,12 +21,17 @@ var (
 )
 
 // NewStacksResource is a helper function to simplify the provider implementation.
-func NewStacksResource() resource.Resource {
-	return &StacksResource{}
+func NewStacksResource(mapPlanModifier *mapPlanModifier) resource.Resource {
+	return &StacksResource{
+		mapPlanModifier: mapPlanModifier,
+	}
 }
 
 // StacksResource is the resource implementation.
-type StacksResource struct{}
+type StacksResource struct {
+	providerData    *StacksLiteProviderData
+	mapPlanModifier *mapPlanModifier
+}
 
 // StacksResourceModel maps the resource schema data.
 type StacksResourceModel struct {
@@ -37,6 +41,24 @@ type StacksResourceModel struct {
 
 func (r *StacksResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = "stacks"
+}
+
+func (r *StacksResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+	if req.ProviderData == nil {
+		return
+	}
+
+	data, ok := req.ProviderData.(*StacksLiteProviderData)
+	if !ok {
+		resp.Diagnostics.AddError(
+			"Unexpected Resource Configure Type",
+			fmt.Sprintf("Expected *StacksLiteProviderData, got: %T. Please report this issue to the provider developers.", req.ProviderData),
+		)
+		return
+	}
+
+	r.providerData = data
+	r.mapPlanModifier.providerData = data
 }
 
 func (r *StacksResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
@@ -52,7 +74,7 @@ func (r *StacksResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Computed:    true,
 				ElementType: types.StringType,
 				PlanModifiers: []planmodifier.Map{
-					newMapPlanModifier(),
+					r.mapPlanModifier,
 				},
 			},
 		},
@@ -128,7 +150,11 @@ func (r *StacksResource) Delete(ctx context.Context, req resource.DeleteRequest,
 }
 
 func (r *StacksResource) readApplyOutputs(stack string) (types.Map, error) {
-	outputPath := filepath.Join(stack, "outputs.json")
+	if r.providerData == nil {
+		return types.MapNull(types.StringType), fmt.Errorf("provider data not configured")
+	}
+
+	outputPath := r.providerData.OutputsPath(stack)
 	tflog.Debug(context.Background(), fmt.Sprintf("Reading apply outputs from %s", outputPath))
 
 	data, err := os.ReadFile(outputPath)
