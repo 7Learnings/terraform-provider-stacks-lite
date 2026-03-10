@@ -54,7 +54,12 @@ func (m mapPlanModifier) PlanModifyMap(ctx context.Context, req planmodifier.Map
 	data, err := os.ReadFile(planPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			resp.PlanValue = types.MapUnknown(types.StringType)
+			if req.StateValue.IsNull() {
+				resp.PlanValue = types.MapUnknown(types.StringType)
+			} else {
+				// plan with current state if upstream planning could be skipped
+				resp.PlanValue = req.StateValue
+			}
 			return
 		}
 		resp.Diagnostics.AddError("Error reading upstream plan file", fmt.Sprintf("Failed to read upstream plan from %q: %v", planPath, err))

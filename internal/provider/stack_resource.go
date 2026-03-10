@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -89,6 +90,10 @@ func (r *StacksResource) Read(ctx context.Context, req resource.ReadRequest, res
 
 	outputs, err := r.readApplyOutputs(state.Stack.ValueString())
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return
+		}
+
 		resp.Diagnostics.AddError("Error reading upstream apply outputs", err.Error())
 		return
 	}
