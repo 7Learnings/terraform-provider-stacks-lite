@@ -85,7 +85,13 @@ for stack in "${STACKS[@]}"; do
 
     # cross-stack deps
     echo -e '# Cross-stack dependencies'
-    sed -nE "s|.*\bstack\s*=\s*\"([^\"]+)\"|$stack/\$(ENV)/tfplan.json: \1/\$(ENV)/tfplan.json\n$stack/\$(ENV)/outputs.json: \1/\$(ENV)/outputs.json|p" "${!deps[@]}"
+    mapfile -t upstreams < <(sed -nE "s|.*\bstack\s*=\s*\"([^\"]+)\"|\1|p" "${!deps[@]}" 2>/dev/null)
+    for upstream in "${upstreams[@]}"; do
+        # When running plan-changed/apply-changed, only depend on upstream if it's also in CHANGED_STACKS
+        echo "$stack/\$(ENV)/tfplan.json: \$(if \$(filter plan-changed apply-changed,\$(MAKECMDGOALS)),\$(if \$(filter $upstream,\$(CHANGED_STACKS)),$upstream/\$(ENV)/tfplan.json),$upstream/\$(ENV)/tfplan.json)"
+        echo "$stack/\$(ENV)/outputs.json: \$(if \$(filter plan-changed apply-changed,\$(MAKECMDGOALS)),\$(if \$(filter $upstream,\$(CHANGED_STACKS)),$upstream/\$(ENV)/outputs.json),$upstream/\$(ENV)/outputs.json)"
+        echo "DOWNSTREAMS_$upstream += $stack"
+    done
 
     # Filter .tfvars with exact ENV matching logic
     for f in "${FILES[@]}"; do
