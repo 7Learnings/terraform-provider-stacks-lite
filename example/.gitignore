@@ -37,6 +37,7 @@ override.tf.json
 tfplan
 tfplan.json
 outputs.json
+apply.log.json
 
 # Ignore CLI configuration files
 .terraformrc
