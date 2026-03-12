@@ -3,7 +3,7 @@
 set_up() {
     ENV=dev-eu
     NSTACKS=0
-    source gen_deps.sh $ENV $NSTACKS
+    source stacks-gen-deps.sh $ENV $NSTACKS
 }
 
 test_branch_pattern() {
