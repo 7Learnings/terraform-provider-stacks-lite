@@ -83,6 +83,9 @@ clean:
 deps-$(ENV).d: gen_deps.sh Makefile $(FILES)
 	$(Q)./$< "$(ENV)" $(words $(STACKS)) $(STACKS:%/=%) $(FILES) > $@
 
+# used to break cyclic dependency between CHANGED_STACKS and deps.d
+.SECONDEXPANSION:
+
 include deps-$(ENV).d
 
 # --- Changed Stacks Detection ---
