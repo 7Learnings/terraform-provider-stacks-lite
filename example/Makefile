@@ -9,6 +9,12 @@ FILES:=$(shell git ls-files -- '*.tf' '*.tfvars')
 ifeq ($(ENV),)
   $(error 'Must set ENV variable')
 endif
+ifneq ($(MAKECMDGOALS),clean)
+  UNTRACKED:=$(shell git ls-files --other --exclude-standard -- '*.tf' '*.tfvars' '*.tfvars.json')
+  ifneq ($(UNTRACKED),)
+    $(error 'Found untracked (or deleted) files: $(UNTRACKED)')
+  endif
+endif
 
 # Find all leaf dirs by sorting and eliminating prefixes of succeeding dirs
 STACKS := $(shell printf '%s\n' $(sort $(filter-out ./,$(dir $(FILES)))) | \
@@ -34,7 +40,7 @@ $(addsuffix $(ENV)/outputs.json,$(STACKS)) $(addsuffix $(ENV)/tfplan.json,$(STAC
 
 $(addsuffix $(ENV),$(STACKS)): # working directories
 	$(Q)mkdir -p $@
-	$(Q)echo '*' > $@/.gitignore
+	$(Q)echo '.gitignore' > $@/.gitignore
 
 # --- Terraform Init ---
 
@@ -42,9 +48,11 @@ $(addsuffix $(ENV),$(STACKS)): # working directories
 # TODO: gather and import used modules so they don't have to be declared in providers.tf
 $(addsuffix $(ENV)/.terraform,$(STACKS)): %/$(ENV)/.terraform: | .terraform %/$(ENV)/.terraform.lock.hcl %/$(ENV)
 	$(Q)ln --relative -sf $(firstword $|) $(@D)/
+	$(Q)echo $(@F) >> $(@D)/.gitignore
 
 $(addsuffix $(ENV)/.terraform.lock.hcl,$(STACKS)): %/$(ENV)/.terraform.lock.hcl: | .terraform.lock.hcl %/$(ENV)
 	$(Q)ln --relative -sf $(firstword $|) $(@D)/
+	$(Q)echo $(@F) >> $(@D)/.gitignore
 
 .terraform .terraform.lock.hcl:
 	$(Q)$(TF) init -var=stacks_root=. -var=stacks_env=$(ENV) -var=stack=_
@@ -63,6 +71,7 @@ $(addsuffix $(ENV)/_vars.auto.tf,$(STACKS)): %/$(ENV)/_vars.auto.tf:
 		echo "# auto-generated variable declarations for $*/$(ENV)"; \
 		sed -nE 's|^\s*([a-zA-Z0-9_-]+)\s*=.*$$|variable "\1" {}|p' $(filter %.tfvars,$^) | sort -u; \
 	} > $@
+	$(Q)printf '%s\n' $(^F) $(@F) >> $(@D)/.gitignore
 
 # Resort to implicit rules for the symlinks to to avoid multiple wildcard targets or
 # having to stamp out a macro for each stack (https://stackoverflow.com/a/74450187)
