@@ -24,8 +24,24 @@ STACKS := $(shell printf '%s\n' $(sort $(filter-out ./,$(dir $(FILES)))) | \
 
 # plan
 $(addsuffix $(ENV)/tfplan.json,$(STACKS)): %/$(ENV)/tfplan.json: %/$(ENV)/.terraform
-	$(Q)echo "Planning $*"
-	$(Q)cd $(@D) && $(TF) plan -lock=false -refresh=false -out=tfplan && $(TF) show -json tfplan > $(@F)
+	$(Q)skip=false; \
+	if [ -n "$(filter plan-changed apply-changed,$(MAKECMDGOALS))" ] && \
+	   [ -z "$(filter $*,$(_DIRECTLY_CHANGED))" ] && [ -f "$@" ]; then \
+	    skip=true; \
+	    for up in $(UPSTREAMS_$*); do \
+	        if jq -e '.output_changes // {} | to_entries | any(.value.actions != ["no-op"])' \
+	            $$up/$(ENV)/tfplan.json >/dev/null 2>&1; then \
+	            skip=false; break; \
+	        fi; \
+	    done; \
+	fi; \
+	if $$skip; then \
+	    echo "Skipping $* (upstream outputs unchanged)"; \
+	    echo '{}' > $(@); \
+	else \
+	    echo "Planning $*"; \
+	    cd $(@D) && $(TF) plan -lock=false -refresh=false -out=tfplan && $(TF) show -json tfplan > $(@F); \
+	fi
 
 # apply
 $(addsuffix $(ENV)/outputs.json,$(STACKS)): %/$(ENV)/outputs.json: %/$(ENV)/tfplan.json
