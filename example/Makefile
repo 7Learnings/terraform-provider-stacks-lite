@@ -1,8 +1,9 @@
 ENV:= # stacks environment, e.g. dev-eu or production-us
 TF:=tofu
 Q:=@ # run make Q= for verbose output
+# Set DIFF_BASE to compare against (e.g. origin/main, @{upstream}, HEAD~3)
+DIFF_BASE:=@{upstream}
 
-# TODO: gotcha uncommitted files
 FILES:=$(shell git ls-files -- '*.tf' '*.tfvars')
 
 ifeq ($(ENV),)
@@ -83,6 +84,25 @@ deps-$(ENV).d: gen_deps.sh Makefile $(FILES)
 	$(Q)./$< "$(ENV)" $(words $(STACKS)) $(STACKS:%/=%) $(FILES) > $@
 
 include deps-$(ENV).d
+
+# --- Changed Stacks Detection ---
+
+ifneq ($(filter plan-changed apply-changed changed,$(MAKECMDGOALS)),)
+_CHANGED_DIRS := $(sort $(dir $(shell git diff --name-only $(DIFF_BASE) -- "*.tf" "*.tfvars" 2>/dev/null)))
+_HAS_ROOT_CHANGE := $(filter ./,$(_CHANGED_DIRS))
+_DIRECTLY_CHANGED := $(sort $(if $(_HAS_ROOT_CHANGE),$(STACKS:%/=%),\
+    $(foreach d,$(filter-out ./,$(_CHANGED_DIRS)),$(patsubst %/,%,$(filter $(d) $(d)%,$(STACKS))))))
+# Expand downstreams transitively (3 iterations)
+_CS1 := $(sort $(_DIRECTLY_CHANGED) $(foreach s,$(_DIRECTLY_CHANGED),$(DOWNSTREAMS_$(s))))
+_CS2 := $(sort $(_CS1) $(foreach s,$(_CS1),$(DOWNSTREAMS_$(s))))
+CHANGED_STACKS := $(sort $(_CS2) $(foreach s,$(_CS2),$(DOWNSTREAMS_$(s))))
+endif
+
+.PHONY: plan-changed apply-changed changed
+plan-changed: $(CHANGED_STACKS:%=plan-%)
+apply-changed: $(CHANGED_STACKS:%=apply-%)
+changed:
+	@echo '$(if $(CHANGED_STACKS),$(CHANGED_STACKS),(no changed stacks detected))'
 
 # Disable legacy builtin suffix rules (https://www.gnu.org/software/make/manual/html_node/Suffix-Rules.html)
 .SUFFIXES:
