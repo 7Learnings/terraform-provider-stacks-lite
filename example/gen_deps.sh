@@ -92,6 +92,7 @@ for stack in "${STACKS[@]}"; do
         echo "$stack/\$(ENV)/tfplan.json: \$(if \$(filter plan-changed apply-changed,\$(MAKECMDGOALS)),\$\$(if \$\$(filter $upstream,\$\$(CHANGED_STACKS)),$upstream/\$(ENV)/tfplan.json),$upstream/\$(ENV)/tfplan.json)"
         echo "$stack/\$(ENV)/outputs.json: \$(if \$(filter plan-changed apply-changed,\$(MAKECMDGOALS)),\$\$(if \$\$(filter $upstream,\$\$(CHANGED_STACKS)),$upstream/\$(ENV)/outputs.json),$upstream/\$(ENV)/outputs.json)"
         echo "DOWNSTREAMS_$upstream += $stack"
+        echo "UPSTREAMS_$stack += $upstream"
     done
 
     # Filter .tfvars with exact ENV matching logic
