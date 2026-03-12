@@ -105,7 +105,7 @@ clean:
 # --- Dynamic Dependency Logic ---
 
 # Included will be rebuild before inclusion in the same make invocation (similar to Makefile rules)
-deps-$(ENV).d: gen_deps.sh Makefile $(FILES)
+deps-$(ENV).d: $(dir $(lastword $(MAKEFILE_LIST)))stacks-gen-deps.sh $(lastword $(MAKEFILE_LIST)) $(FILES)
 	$(Q)./$< "$(ENV)" $(words $(STACKS)) $(STACKS:%/=%) $(FILES) > $@
 
 # used to break cyclic dependency between CHANGED_STACKS and deps.d

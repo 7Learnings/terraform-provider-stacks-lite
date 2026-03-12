@@ -13,13 +13,18 @@ The philosophy of this framework is to simplify Terraform management by adhering
 
 Based on an idea from [cisco-open/stacks: Stacks, the Terraform code pre-processor](https://github.com/cisco-open/stacks) (see [intro](https://github.com/cisco-open/stacks/blob/main/docs/2.2.%20I%20am%20starting%20from%20scratch.md)), developed further while trying to scale a multi-tenant TF state.
 
+## 2. Installation
+
+Install as git submodule then include the stacks.mk in your top-level Makefile.
+
 ## 2. Directory Layout
 
 The project uses a hierarchical directory structure where code (`.tf`) and configuration (`.tfvars`) can be placed at any level, allowing for easy sharing. Stacks are simply the "leaf" directories in this structure.
 
 ```
 stacks/
-├── Makefile                            # The automation driver for the project.
+├── Makefile                            # The automation driver for the project (`include stacks-lite/stacks.mk`).
+├── stacks-lite                         # The git submodule of this repo.
 ├── backend.tf                          # A global Terraform backend configuration shared by all stacks.
 ├── providers.tf                        # A global provider configuration shared by all stacks.
 ├── all.tfvars                          # Variables for all stacks common to all envs.
