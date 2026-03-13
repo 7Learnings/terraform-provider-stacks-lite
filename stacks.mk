@@ -48,9 +48,14 @@ $(addsuffix $(ENV)/outputs.json,$(STACKS)): %/$(ENV)/outputs.json: %/$(ENV)/tfpl
 	$(Q)echo "Applying $*"
 	$(Q)cd $(@D) && $(TF) apply -json-into=apply.log.json tfplan && tail -n 1 apply.log.json | jq .outputs > $(@F)
 
+# destroy
+$(addsuffix $(ENV)/.destroy,$(STACKS)): %/$(ENV)/.destroy:
+	$(Q)echo "Destroying $*"
+	$(Q)cd $(@D) && $(TF) destroy
+
 # export stacks-lite provider config as environment variables
-$(addsuffix $(ENV)/outputs.json,$(STACKS)) $(addsuffix $(ENV)/tfplan.json,$(STACKS)): export STACKS_ROOT=$(shell revpath $(@D))
-$(addsuffix $(ENV)/outputs.json,$(STACKS)) $(addsuffix $(ENV)/tfplan.json,$(STACKS)): export STACKS_ENV=$(ENV)
+$(addsuffix $(ENV)/outputs.json,$(STACKS)) $(addsuffix $(ENV)/tfplan.json,$(STACKS)) $(addsuffix $(ENV)/.destroy,$(STACKS)): export STACKS_ROOT=$(shell revpath $(@D))
+$(addsuffix $(ENV)/outputs.json,$(STACKS)) $(addsuffix $(ENV)/tfplan.json,$(STACKS)) $(addsuffix $(ENV)/.destroy,$(STACKS)): export STACKS_ENV=$(ENV)
 
 # --- Working Directories ---
 
