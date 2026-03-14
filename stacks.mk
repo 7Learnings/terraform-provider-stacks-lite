@@ -4,6 +4,13 @@ Q:=@ # run make Q= for verbose output
 # Set DIFF_BASE to compare against (e.g. origin/main, @{upstream}, HEAD~3)
 DIFF_BASE:=@{upstream}
 
+SHELL := /usr/bin/env bash
+
+# pipe to prefix TF output with stack name
+export CLICOLOR_FORCE=1
+.SHELLFLAGS := -o pipefail -c
+P = 2>&1 | awk -v s="$*" '{ printf "[%-16s] %s\n", s, $$0; fflush() }'
+
 FILES:=$(shell git ls-files -- '*.tf' '*.tfvars')
 
 ifeq ($(ENV),)
@@ -39,19 +46,21 @@ $(addsuffix $(ENV)/tfplan.json,$(STACKS)): %/$(ENV)/tfplan.json: %/$(ENV)/.terra
 	    echo "Skipping $* (upstream outputs unchanged)"; \
 	    echo '{}' > $(@); \
 	else \
-	    echo "Planning $*"; \
-	    cd $(@D) && $(TF) plan -lock=false -refresh=false -out=tfplan && $(TF) show -json tfplan > $(@F); \
+	    echo "Planning $*" $(P); \
+	    cd $(@D) && $(TF) plan -lock=false -refresh=false -out=tfplan $(P) && \
+	    $(TF) show -json tfplan > $(@F); \
 	fi
 
 # apply
 $(addsuffix $(ENV)/outputs.json,$(STACKS)): %/$(ENV)/outputs.json: %/$(ENV)/tfplan.json
-	$(Q)echo "Applying $*"
-	$(Q)cd $(@D) && $(TF) apply -json-into=apply.log.json tfplan && tail -n 1 apply.log.json | jq .outputs > $(@F)
+	$(Q)echo "Applying $*" $(P)
+	$(Q)cd $(@D) && $(TF) apply -json-into=apply.log.json tfplan $(P) && \
+	    tail -n 1 apply.log.json | jq .outputs > $(@F)
 
 # destroy
 $(addsuffix $(ENV)/.destroy,$(STACKS)): %/$(ENV)/.destroy:
-	$(Q)echo "Destroying $*"
-	$(Q)cd $(@D) && $(TF) destroy
+	$(Q)echo "Destroying $*" $(P)
+	$(Q)cd $(@D) && $(TF) destroy $(P)
 
 # export stacks-lite provider config as environment variables
 $(addsuffix $(ENV)/outputs.json,$(STACKS)) $(addsuffix $(ENV)/tfplan.json,$(STACKS)) $(addsuffix $(ENV)/.destroy,$(STACKS)): export STACKS_ROOT=$(shell revpath $(@D))
