@@ -54,7 +54,14 @@ $(addsuffix $(ENV)/tfplan.json,$(STACKS)): %/$(ENV)/tfplan.json: %/$(ENV)/.terra
 # apply
 $(addsuffix $(ENV)/outputs.json,$(STACKS)): %/$(ENV)/outputs.json: %/$(ENV)/tfplan.json
 	$(Q)echo "Applying $*" $(P)
-	$(Q)cd $(@D) && $(TF) apply -json-into=apply.log.json tfplan $(P) && \
+# Applying downstream stacks also (re-)reads upstream tfplan.json in the final plan validation phase.
+# https://github.com/hashicorp/terraform/blob/main/docs/resource-instance-change-lifecycle.md
+# https://github.com/opentofu/opentofu/blob/cba3902c0bf20531ee27d6c76e907fa7348b74e6/internal/engine/applying/operations_resource_managed.go#L91
+# Because of that we mark tfplans as old rather than to directly delete them, so that they will be rebuild during the next plan.
+	$(Q)cd $(@D) && \
+	    touch --no-create --time=mtime --date=@0 tfplan tfplan.json && \
+	    $(TF) apply -json-into=apply.log.json tfplan $(P) && \
+	    rm tfplan && \
 	    tail -n 1 apply.log.json | jq .outputs > $(@F)
 
 # destroy
