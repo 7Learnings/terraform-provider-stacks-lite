@@ -70,9 +70,15 @@ $(addsuffix $(ENV)/.destroy,$(STACKS)): %/$(ENV)/.destroy:
 	$(Q)echo "Destroying $*" $(P)
 	$(Q)cd $(@D) && $(TF) destroy -parallelism=$(TF_PARALLELISM) $(P)
 
+# refresh (actually produces outputs.json for downstream stacks)
+$(addsuffix $(ENV)/.refresh,$(STACKS)): %/$(ENV)/.refresh: %/$(ENV)/_vars.auto.tf %/$(ENV)/.terraform
+	$(Q)echo "Refreshing $*" $(P)
+	$(Q)cd $(@D) && $(TF) refresh -parallelism=$(TF_PARALLELISM) -json-into=refresh.log.json $(P) && \
+	    tail -n 1 refresh.log.json | jq .outputs > outputs.json
+
 # export stacks-lite provider config as environment variables
-$(addsuffix $(ENV)/outputs.json,$(STACKS)) $(addsuffix $(ENV)/tfplan.json,$(STACKS)) $(addsuffix $(ENV)/.destroy,$(STACKS)): export STACKS_ROOT=$(shell revpath $(@D))
-$(addsuffix $(ENV)/outputs.json,$(STACKS)) $(addsuffix $(ENV)/tfplan.json,$(STACKS)) $(addsuffix $(ENV)/.destroy,$(STACKS)): export STACKS_ENV=$(ENV)
+$(addsuffix $(ENV)/outputs.json,$(STACKS)) $(addsuffix $(ENV)/tfplan.json,$(STACKS)) $(addsuffix $(ENV)/.destroy,$(STACKS)) $(addsuffix $(ENV)/.refresh,$(STACKS)): export STACKS_ROOT=$(shell revpath $(@D))
+$(addsuffix $(ENV)/outputs.json,$(STACKS)) $(addsuffix $(ENV)/tfplan.json,$(STACKS)) $(addsuffix $(ENV)/.destroy,$(STACKS)) $(addsuffix $(ENV)/.refresh,$(STACKS)): export STACKS_ENV=$(ENV)
 
 # --- Working Directories ---
 

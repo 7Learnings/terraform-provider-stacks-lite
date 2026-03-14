@@ -61,7 +61,7 @@ if (return 0 2>/dev/null); then
 fi
 
 echo "# Auto-generated dependencies for ENV: $ENV"
-ops=(plan apply destroy)
+ops=(plan apply destroy refresh)
 echo ".PHONY: ${ops[*]}"
 for op in "${ops[@]}"; do
     echo "$op: ${STACKS[@]/#/$op-}"
@@ -73,6 +73,7 @@ for stack in "${STACKS[@]}"; do
     echo "plan-$stack: $stack/\$(ENV)/tfplan.json"
     echo "apply-$stack: $stack/\$(ENV)/outputs.json"
     echo "destroy-$stack: $stack/\$(ENV)/.destroy"
+    echo "refresh-$stack: $stack/\$(ENV)/.refresh"
 
     # 4. Build the path hierarchy pattern to match any inherited files
     pattern="$(along_branch_re "$stack")"
@@ -95,6 +96,7 @@ for stack in "${STACKS[@]}"; do
         echo "$stack/\$(ENV)/tfplan.json: \$(if \$(filter plan-changed apply-changed,\$(MAKECMDGOALS)),\$\$(if \$\$(filter $upstream,\$\$(CHANGED_STACKS)),$upstream/\$(ENV)/tfplan.json),$upstream/\$(ENV)/tfplan.json)"
         echo "$stack/\$(ENV)/outputs.json: \$(if \$(filter plan-changed apply-changed,\$(MAKECMDGOALS)),\$\$(if \$\$(filter $upstream,\$\$(CHANGED_STACKS)),$upstream/\$(ENV)/outputs.json),$upstream/\$(ENV)/outputs.json)"
         echo "$upstream/\$(ENV)/.destroy: destroy-$stack" # destroy in reverse order
+        echo "$stack/\$(ENV)/.refresh: refresh-$upstream"
         echo "DOWNSTREAMS_$upstream += $stack"
         echo "UPSTREAMS_$stack += $upstream"
     done
