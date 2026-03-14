@@ -1,6 +1,9 @@
 ENV:= # stacks environment, e.g. dev-eu or production-us
 TF:=tofu
 Q:=@ # run make Q= for verbose output
+TF_PARALLELISM:=128
+TF_REFRESH:=false # whether to refresh during plan
+
 # Set DIFF_BASE to compare against (e.g. origin/main, @{upstream}, HEAD~3)
 DIFF_BASE:=@{upstream}
 
@@ -47,7 +50,7 @@ $(addsuffix $(ENV)/tfplan.json,$(STACKS)): %/$(ENV)/tfplan.json: %/$(ENV)/.terra
 	    echo '{}' > $(@); \
 	else \
 	    echo "Planning $*" $(P); \
-	    cd $(@D) && $(TF) plan -lock=false -refresh=false -out=tfplan $(P) && \
+	    cd $(@D) && $(TF) plan -parallelism=$(TF_PARALLELISM) -refresh=$(TF_REFRESH) -lock=$(TF_REFRESH) -out=tfplan $(P) && \
 	    $(TF) show -json tfplan > $(@F); \
 	fi
 
@@ -58,14 +61,14 @@ $(addsuffix $(ENV)/outputs.json,$(STACKS)): %/$(ENV)/outputs.json: %/$(ENV)/tfpl
 # https://github.com/hashicorp/terraform/blob/main/docs/resource-instance-change-lifecycle.md
 # https://github.com/opentofu/opentofu/blob/cba3902c0bf20531ee27d6c76e907fa7348b74e6/internal/engine/applying/operations_resource_managed.go#L91
 # Because of that we mark tfplans as old rather than to directly delete them, so that they will be rebuild during the next plan.
-	$(Q)cd $(@D) && $(TF) apply -json-into=apply.log.json tfplan $(P) && \
+	$(Q)cd $(@D) && $(TF) apply -parallelism=$(TF_PARALLELISM) -json-into=apply.log.json tfplan $(P) && \
 	    tail -n 1 apply.log.json | jq .outputs > $(@F) && \
-	    touch --no-create --time=mtime --date=@0 tfplan tfplan.json # mark applied plans as stale
+	    rm tfplan && touch --no-create --time=mtime --date=@0 tfplan.json # mark applied plans as stale
 
 # destroy
 $(addsuffix $(ENV)/.destroy,$(STACKS)): %/$(ENV)/.destroy:
 	$(Q)echo "Destroying $*" $(P)
-	$(Q)cd $(@D) && $(TF) destroy $(P)
+	$(Q)cd $(@D) && $(TF) destroy -parallelism=$(TF_PARALLELISM) $(P)
 
 # export stacks-lite provider config as environment variables
 $(addsuffix $(ENV)/outputs.json,$(STACKS)) $(addsuffix $(ENV)/tfplan.json,$(STACKS)) $(addsuffix $(ENV)/.destroy,$(STACKS)): export STACKS_ROOT=$(shell revpath $(@D))
