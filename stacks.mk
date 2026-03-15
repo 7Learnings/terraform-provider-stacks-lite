@@ -149,6 +149,9 @@ clean:
 # Included will be rebuild before inclusion in the same make invocation (similar to Makefile rules)
 deps-$(ENV).d: $(dir $(lastword $(MAKEFILE_LIST)))stacks-gen-deps.sh $(lastword $(MAKEFILE_LIST)) $(FILES)
 	$(Q)./$< "$(ENV)" $(words $(STACKS)) $(STACKS:%/=%) $(FILES) > $@
+	$(Q)echo 'include deps-$(ENV).d' > .check-cycles-$(ENV).mk
+	$(Q)! $(MAKE) -f .check-cycles-$(ENV).mk plan -n 2>&1 | grep -Fi Circular
+	$(Q)rm .check-cycles-$(ENV).mk
 
 # used to break cyclic dependency between CHANGED_STACKS and deps.d
 .SECONDEXPANSION:
