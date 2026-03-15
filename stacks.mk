@@ -79,8 +79,10 @@ $(addsuffix $(ENV)/.refresh,$(STACKS)): %/$(ENV)/.refresh: %/$(ENV)/_vars.auto.t
 	    tail -n 1 refresh.log.json | jq .outputs > outputs.json
 
 # export stacks-lite provider config as environment variables
-$(addsuffix $(ENV)/outputs.json,$(STACKS)) $(addsuffix $(ENV)/tfplan.json,$(STACKS)) $(addsuffix $(ENV)/.destroy,$(STACKS)) $(addsuffix $(ENV)/.refresh,$(STACKS)): export STACKS_ROOT=$(shell revpath $(@D))
-$(addsuffix $(ENV)/outputs.json,$(STACKS)) $(addsuffix $(ENV)/tfplan.json,$(STACKS)) $(addsuffix $(ENV)/.destroy,$(STACKS)) $(addsuffix $(ENV)/.refresh,$(STACKS)): export STACKS_ENV=$(ENV)
+ALL_TARGETS:=$(addsuffix $(ENV)/outputs.json,$(STACKS)) $(addsuffix $(ENV)/tfplan.json,$(STACKS)) $(addsuffix $(ENV)/.destroy,$(STACKS)) $(addsuffix $(ENV)/.refresh,$(STACKS))
+$(ALL_TARGETS): export STACKS_ROOT=$(shell revpath $(@D))
+$(ALL_TARGETS): export STACKS_ENV=$(ENV)
+$(ALL_TARGETS): export TF_CLI_CONFIG_FILE=.terraformrc
 
 # --- Working Directories ---
 
@@ -96,13 +98,25 @@ $(addsuffix $(ENV)/.terraform,$(STACKS)): %/$(ENV)/.terraform: | .terraform %/$(
 	$(Q)ln --relative -sf $(firstword $|) $(@D)/
 	$(Q)echo $(@F) >> $(@D)/.gitignore
 
-$(addsuffix $(ENV)/.terraform.lock.hcl,$(STACKS)): %/$(ENV)/.terraform.lock.hcl: | .terraform.lock.hcl %/$(ENV)
+$(addsuffix $(ENV)/.terraform.lock.hcl,$(STACKS)): %/$(ENV)/.terraform.lock.hcl: | .terraform.lock.hcl %/$(ENV)/.terraformrc %/$(ENV)
 	$(Q)ln --relative -sf $(firstword $|) $(@D)/
 	$(Q)echo $(@F) >> $(@D)/.gitignore
 
-.terraform .terraform.lock.hcl:
+$(addsuffix $(ENV)/.terraformrc,$(STACKS)): %/$(ENV)/.terraformrc: | .terraformrc %/$(ENV)
+	$(Q)ln --relative -sf $(firstword $|) $(@D)/
+	$(Q)echo $(@F) >> $(@D)/.gitignore
+
+.terraform .terraform.lock.hcl: | .terraformrc
 	$(Q)$(TF) init -var=stacks_root=. -var=stacks_env=$(ENV) -var=stack=_
 	$(Q)touch $@
+
+# built provider until it's published
+PROVIDER_PATH:=registry.opentofu.org/7learnings/stacks-lite/0.1.0/linux_amd64/terraform-provider-stacks-lite_v0.1.0
+.terraformrc: $(dir $(filter %/stacks.mk,$(MAKEFILE_LIST)))$(PROVIDER_PATH)
+	$(Q)echo 'provider_installation { filesystem_mirror { path = "$(abspath $(dir $(filter %/stacks.mk,$(MAKEFILE_LIST))))" include=["registry.opentofu.org/7learnings/stacks-lite"] } direct {} }' > $@
+
+$(dir $(filter %/stacks.mk,$(MAKEFILE_LIST)))$(PROVIDER_PATH):
+	$(Q)cd $(dir $(filter %/stacks.mk,$(MAKEFILE_LIST))) && go build -o $(PROVIDER_PATH)
 
 $(addsuffix $(ENV)/zzz_stacks.auto.tfvars,$(STACKS)): %/$(ENV)/zzz_stacks.auto.tfvars:
 	$(Q){\
