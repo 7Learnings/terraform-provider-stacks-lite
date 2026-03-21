@@ -33,16 +33,17 @@ stacks/
 ├── dev-eu.tfvars
 ├── org/                                # A simple, non-nested stack.
 │   └── main.tf
-└── network/
-    ├── all.tfvars                      # Variables for the network stacks common to all envs.
-    ├── eu.tfvars                       # Variables for the network stacks used in eu envs.
-    ├── us.tfvars
-    ├── netplan.tf                      # A shared `.tf` file injected into all network stacks (useful for e.g. `locals`)
-    └── vpc/                            # A nested stack. Note that its internal `.tf` file structure is flexible.
-        ├── common.tfvars               # Variables for the vpc stack common to all envs.
-        ├── prod-eu.tfvars              # Override for prod-eu env.
-        ├── main.tf
-        └── subnets.tf
+├── network/
+│   ├── all.tfvars                      # Variables for the network stacks common to all envs.
+│   ├── eu.tfvars                       # Variables for the network stacks used in eu envs.
+│   ├── us.tfvars
+│   ├── netplan.tf                      # A shared `.tf` file injected into all network stacks (useful for e.g. `locals`)
+│   └── vpc/                            # A nested stack. Note that its internal `.tf` file structure is flexible.
+│       ├── common.tfvars               # Variables for the vpc stack common to all envs.
+│       ├── prod-eu.tfvars              # Override for prod-eu env.
+│       ├── main.tf
+│       └── subnets.tf
+└── modules/                            # TF modules (use `${var.stacks_root}/modules/path` as src)
 ```
 
 ## 3. Core Concepts: A Walkthrough

@@ -19,6 +19,13 @@ resource "terraform_data" "instances" {
   }
 }
 
+module "subnet" {
+  source = "${var.stacks_root}/modules/subnet/"
+  name       = "subnet-instances"
+  cidr_block = "10.0.0.0/8"
+  az         = "eu"
+}
+
 output "instances" {
   value = [for i in terraform_data.instances : i.output]
 }
