@@ -14,20 +14,21 @@ export CLICOLOR_FORCE=1
 .SHELLFLAGS := -o pipefail -c
 P = 2>&1 | awk -v s="$*" '{ printf "[%-16s] %s\n", s, $$0; fflush() }'
 
-FILES:=$(shell git ls-files -- '*.tf' '*.tfvars')
+FILES:=$(filter-out %modules.auto.tf,$(shell git ls-files -- '*.tf' '*.tfvars'))
 
 ifeq ($(ENV),)
   $(error 'Must set ENV variable')
 endif
 ifneq ($(MAKECMDGOALS),clean)
-  UNTRACKED:=$(shell git ls-files --other --exclude-standard -- '*.tf' '*.tfvars' '*.tfvars.json')
+  UNTRACKED:=$(filter-out %modules.auto.tf,$(shell git ls-files --other --exclude-standard -- '*.tf' '*.tfvars' '*.tfvars.json'))
   ifneq ($(UNTRACKED),)
     $(error 'Found untracked (or deleted) files: $(UNTRACKED)')
   endif
 endif
 
 # Find all leaf dirs by sorting and eliminating prefixes of succeeding dirs
-STACKS := $(shell printf '%s\n' $(sort $(filter-out ./,$(dir $(FILES)))) | \
+# Filter out any modules along the path.
+STACKS := $(shell printf '%s\n' $(sort $(filter-out ./ modules/%,$(dir $(FILES)))) | \
     awk '{ if (NR > 1 && index($$0, prev) != 1) print prev; prev = $$0 } END { print prev }')
 
 # --- Rules ---
@@ -106,14 +107,25 @@ $(addsuffix $(ENV)/.terraformrc,$(STACKS)): %/$(ENV)/.terraformrc: | .terraformr
 	$(Q)ln --relative -sf $(firstword $|) $(@D)/
 	$(Q)echo $(@F) >> $(@D)/.gitignore
 
-.terraform .terraform.lock.hcl: | .terraformrc
-	$(Q)$(TF) init -var=stacks_root=. -var=stacks_env=$(ENV) -var=stack=_
+.terraform .terraform.lock.hcl: _modules.auto.tf | .terraformrc
+# init all local modules from root "stack"
+	$(Q)$(TF) init -var=stacks_root=. -var=stacks_env=$(STACKS_ENV) -var=stack=root
 	$(Q)touch $@
+
+_modules.auto.tf: $(addsuffix $(ENV)/.modules.auto.tf,$(STACKS))
+# run extract-modules again to dedup identical modules across stacks
+	$(Q){\
+		echo 'variable "stacks_root" {}'; \
+		echo 'variable "stacks_env" {}'; \
+		echo 'variable "stack" {}'; \
+		awk -f $(dir $(filter %/stacks.mk,$(MAKEFILE_LIST)))stacks-extract-modules.awk $^; \
+	} > $@.tmp
+	$(Q)cmp -s $@.tmp $@ && rm $@.tmp || mv $@.tmp $@
 
 # built provider until it's published
 PROVIDER_PATH:=registry.opentofu.org/7learnings/stacks-lite/0.1.0/linux_amd64/terraform-provider-stacks-lite_v0.1.0
 .terraformrc: $(dir $(filter %/stacks.mk,$(MAKEFILE_LIST)))$(PROVIDER_PATH)
-	$(Q)echo 'provider_installation { filesystem_mirror { path = "$(abspath $(dir $(filter %/stacks.mk,$(MAKEFILE_LIST))))" include=["registry.opentofu.org/7learnings/stacks-lite"] } direct {} }' > $@
+	$(Q)echo -e 'provider_installation { filesystem_mirror { path = "$(abspath $(dir $(filter %/stacks.mk,$(MAKEFILE_LIST))))" include=["registry.opentofu.org/7learnings/stacks-lite"] } direct {} }\nplugin_cache_dir   = "$$HOME/.local/share/opentofu/plugins"' > $@
 
 $(dir $(filter %/stacks.mk,$(MAKEFILE_LIST)))$(PROVIDER_PATH):
 	$(Q)cd $(dir $(filter %/stacks.mk,$(MAKEFILE_LIST))) && go build -o $(PROVIDER_PATH)
@@ -133,6 +145,13 @@ $(addsuffix $(ENV)/_vars.auto.tf,$(STACKS)): %/$(ENV)/_vars.auto.tf:
 	} > $@
 	$(Q)printf '%s\n' $(^F) $(@F) >> $(@D)/.gitignore
 
+$(addsuffix $(ENV)/.modules.auto.tf,$(STACKS)): %/$(ENV)/.modules.auto.tf: $(dir $(lastword $(MAKEFILE_LIST)))stacks-extract-modules.awk %/$(ENV)/_vars.auto.tf %/$(ENV)/modules
+	$(Q)awk -f $< $(@D)/*.tf > $@.tmp
+	$(Q)cmp -s $@.tmp $@ && rm $@.tmp || mv $@.tmp $@
+
+$(addsuffix $(ENV)/modules,$(STACKS)): %/$(ENV)/modules: modules
+	$(Q)ln --relative --no-target-directory -sf $< $@
+
 # Resort to implicit rules for the symlinks to to avoid multiple wildcard targets or
 # having to stamp out a macro for each stack (https://stackoverflow.com/a/74450187)
 %.tf:
@@ -145,7 +164,12 @@ $(addsuffix $(ENV)/_vars.auto.tf,$(STACKS)): %/$(ENV)/_vars.auto.tf:
 
 .PHONY: clean
 clean:
-	rm -rf $(STACKS:%/=%/$(ENV))
+	rm -rf $(STACKS:%/=%/$(ENV)) _modules.auto.tf
+
+.PHONY: deepclean
+deepclean: clean
+	rm -rf .terraform .terraformrc _modules.auto.tf $(dir $(filter %/stacks.mk,$(MAKEFILE_LIST)))$(PROVIDER_PATH)
+
 
 # --- Dynamic Dependency Logic ---
 

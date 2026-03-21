@@ -41,16 +41,17 @@ stacks/
 ├── dev-eu.tfvars
 ├── org/                                # A simple, non-nested stack.
 │   └── main.tf
-└── network/
-    ├── all.tfvars                      # Variables for the network stacks common to all envs.
-    ├── eu.tfvars                       # Variables for the network stacks used in eu envs.
-    ├── us.tfvars
-    ├── netplan.tf                      # A shared `.tf` file injected into all network stacks (useful for e.g. `locals`)
-    └── vpc/                            # A nested stack. Note that its internal `.tf` file structure is flexible.
-        ├── common.tfvars               # Variables for the vpc stack common to all envs.
-        ├── prod-eu.tfvars              # Override for prod-eu env.
-        ├── main.tf
-        └── subnets.tf
+├── network/
+│   ├── all.tfvars                      # Variables for the network stacks common to all envs.
+│   ├── eu.tfvars                       # Variables for the network stacks used in eu envs.
+│   ├── us.tfvars
+│   ├── netplan.tf                      # A shared `.tf` file injected into all network stacks (useful for e.g. `locals`)
+│   └── vpc/                            # A nested stack. Note that its internal `.tf` file structure is flexible.
+│       ├── common.tfvars               # Variables for the vpc stack common to all envs.
+│       ├── prod-eu.tfvars              # Override for prod-eu env.
+│       ├── main.tf
+│       └── subnets.tf
+└── modules/                            # Local TF modules (use `./modules/path` as source in stacks)
 ```
 
 ## 4. Core Concepts: A Walkthrough
@@ -203,13 +204,44 @@ resource "google_compute_instance" "default" {
 }
 ```
 
+### 4.3 Example 3: Reusable Modules
+
+Reusable modules are a core part of effective Terraform usage. To use local modules, they have to be stored in the top-level `modules/` directory and referenced as `./modules/my-module` in your stacks. The `modules/` folder is symlinked into each stack's working directory. Remote modules are installed normally as part of the `.terraform` initialization.
+
+**Referencing Local Modules:**
+To reference a local module, you use the `source` attribute with a path relative to the `stacks_root`.
+
+For example, if you have a module at `modules/app-module` within your project root, you would reference it like this:
+
+```hcl
+module "my_app_instance" {
+  source = "./modules/app-module"
+  # ... module specific variables
+}
+```
+
+Normal [remote modules](https://opentofu.org/docs/language/modules/sources/) are installed once with project root then reused across stacks.
+
+```hcl
+module "consul" {
+  source = "hashicorp/consul/aws"
+  version = "0.1.0"
+}
+```
+
+**Installation with `tofu init`:**
+A key advantage of this setup is that these modules are installed only once. The `Makefile`'s execution model (detailed in section 4) ensures that `tofu init` is run centrally at the project root. This means all module dependencies are downloaded and cached or symlinked in the `.terraform/modules` directory at the project root, and subsequent stack plans or applies will reuse these already installed modules. This avoids redundant downloads and speeds up operations.
+
+> [!NOTE]
+> Module names for different sources must be unique across *all* stacks to allow them to be initialized at once.
+
 ## 5. The Automation Driver (`Makefile`) & Execution Model
 
 The entire workflow is orchestrated by a `Makefile` that automates all the steps.
 
 *   **Role of the `Makefile`:** To provide a consistent interface for planning and applying stacks (e.g., `make plan STACK=network/vpc ENV=dev-eu`).
 *   **Key Responsibilities:**
-    1.  **Centralized `init`:** It runs `terraform init` once at the project root to download providers. The resulting `.terraform` directory is shared by all subsequent operations.
+    1.  **Centralized `init`:** It runs `tofu init` once at the project root to download providers and modules. The resulting `.terraform` directory is shared by all subsequent operations.
     1.  **Dependency Graph:** It inspects the source code for referenced stacks to build a dependency graph, ensuring that it plans and applies stacks in the correct order.
     1.  **Execution Workspace:** It creates a temporary, isolated workspace directory for each stack and env (e.g., `network/vpc/dev-eu/`).
     3.  **Symlinking:** It populates this workspace with symlinks to the applicable `.tf` files (the code) and `.tfvars` files (the configuration).
