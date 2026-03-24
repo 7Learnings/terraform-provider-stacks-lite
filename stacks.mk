@@ -64,9 +64,9 @@ $(addsuffix $(ENV)/outputs.json,$(STACKS)): %/$(ENV)/outputs.json: %/$(ENV)/tfpl
 # Because of that we mark tfplans as old rather than to directly delete them, so that they will be rebuild during the next plan.
 	$(Q)cd $(@D) && \
 	    touch --no-create --time=mtime --date=@0 tfplan tfplan.json && \
-	    $(TF) apply -parallelism=$(TF_PARALLELISM) -json-into=apply.log.json tfplan $(P) && \
+	    $(TF) apply -parallelism=$(TF_PARALLELISM) tfplan $(P) && \
 	    rm tfplan && \
-	    tail -n 1 apply.log.json | jq .outputs > $(@F)
+	    $(TF) output -json > $(@F)
 
 # destroy
 $(addsuffix $(ENV)/.destroy,$(STACKS)): %/$(ENV)/.destroy:
@@ -76,8 +76,8 @@ $(addsuffix $(ENV)/.destroy,$(STACKS)): %/$(ENV)/.destroy:
 # refresh (actually produces outputs.json for downstream stacks)
 $(addsuffix $(ENV)/.refresh,$(STACKS)): %/$(ENV)/.refresh: %/$(ENV)/_vars.auto.tf %/$(ENV)/.terraform
 	$(Q)echo "Refreshing $*" $(P)
-	$(Q)cd $(@D) && $(TF) refresh -parallelism=$(TF_PARALLELISM) -json-into=refresh.log.json $(P) && \
-	    tail -n 1 refresh.log.json | jq .outputs > outputs.json
+	$(Q)cd $(@D) && $(TF) refresh -parallelism=$(TF_PARALLELISM) $(P) && \
+	    $(TF) output -json > outputs.json
 
 # export stacks-lite provider config as environment variables
 ALL_TARGETS:=$(addsuffix $(ENV)/outputs.json,$(STACKS)) $(addsuffix $(ENV)/tfplan.json,$(STACKS)) $(addsuffix $(ENV)/.destroy,$(STACKS)) $(addsuffix $(ENV)/.refresh,$(STACKS))
