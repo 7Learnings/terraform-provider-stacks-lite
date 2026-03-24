@@ -1,6 +1,8 @@
 # stacks-lite
 
-Simple tooling for native TF micro-stacks with dependencies.
+Simple tooling for native Terraform and OpenTofu micro-stacks with dependencies.
+
+A micro-stack groups Terraform resources to yield smaller, more maintainable and faster-to-plan terraform states. Multiple stacks depend on each other. Stacks are built for multiple orthogonal sets of environments such as `dev`/`prod` and `eu`/`asia`/`us`.
 
 ## 1. High-Level Goals
 
@@ -9,7 +11,7 @@ The philosophy of this framework is to simplify Terraform management by adhering
 *   **Simplicity:** Focus on a minimal set of concepts, avoiding complex abstractions or templating engines.
 *   **Pure HCL:** The entire codebase is standard HCL, which provides excellent support from IDEs, linters, and other standard tooling.
 *   **Explicit Dependencies:** A robust mechanism allows for declaring and planning dependencies between stacks *before* applying any changes.
-*   **Automation-Driven:** A simple build system (e.g., `Makefile`) is used to orchestrate all Terraform actions, ensuring consistency and reliability.
+*   **Automation-Driven:** A `Makefile` is used to orchestrate all Terraform actions, ensuring consistency and reliability.
 
 Based on an idea from [cisco-open/stacks: Stacks, the Terraform code pre-processor](https://github.com/cisco-open/stacks) (see [intro](https://github.com/cisco-open/stacks/blob/main/docs/2.2.%20I%20am%20starting%20from%20scratch.md)), developed further while trying to scale a multi-tenant TF state.
 
@@ -17,7 +19,13 @@ Based on an idea from [cisco-open/stacks: Stacks, the Terraform code pre-process
 
 Install as git submodule then include the stacks.mk in your top-level Makefile.
 
-## 2. Directory Layout
+Make sure you have the following tools installed:
+* OpenTofu 1.12 (for [-json-into](https://opentofu.org/blog/dual-command-output-streams/))
+* Go
+* GNUMake
+* `revpath` (part of [imake](https://en.wikipedia.org/wiki/Imake))
+
+## 3. Directory Layout
 
 The project uses a hierarchical directory structure where code (`.tf`) and configuration (`.tfvars`) can be placed at any level, allowing for easy sharing. Stacks are simply the "leaf" directories in this structure.
 
@@ -46,11 +54,11 @@ stacks/
 └── modules/                            # TF modules (use `${var.stacks_root}/modules/path` as src)
 ```
 
-## 3. Core Concepts: A Walkthrough
+## 4. Core Concepts: A Walkthrough
 
 The following examples demonstrate how code and configuration are assembled and executed.
 
-### 3.1 Example 1: The Base `vpc` Stack
+### 4.1 Example 1: The Base `vpc` Stack
 
 This walkthrough explains how the code and configuration for a single stack are collected and processed for a specific environment.
 
@@ -163,7 +171,7 @@ output "project_number" {
 }
 ```
 
-### 3.2 Example 2: The `instances` Stack & Cross-Stack Planning
+### 4.2 Example 2: The `instances` Stack & Cross-Stack Planning
 
 This walkthrough explains how a stack can depend on the *planned changes* of another stack.
 
@@ -183,7 +191,7 @@ resource "stacks" "vpc" {
 This resource tells the tooling that this stack depends on the `vpc` stack.
 
 *   **How it Works:** The `stack` resource reads the `tfplan.json` output file from the `vpc` stack's plan. This means it can access the *planned* values of the `vpc` stack's outputs, correctly propagating dependencies that are not yet applied. When the upstream stack did not change and was skipped during planning, the resource uses it's previous outputs state.
-*   **Explicit Contract:** By design, the `stack` resouce only exposes the `outputs` of the upstream stack. This ensures a stable and explicit contract between stacks, preventing brittle dependencies on internal resource attributes.
+*   **Explicit Contract:** By design, the `stack` resource only exposes the `outputs` of the upstream stack. This ensures a stable and explicit contract between stacks, preventing brittle dependencies on internal resource attributes.
 
 You can then use the outputs in your code:
 ```hcl
@@ -196,23 +204,25 @@ resource "google_compute_instance" "default" {
 }
 ```
 
-## 4. The Automation Driver (`Makefile`) & Execution Model
+## 5. The Automation Driver (`Makefile`) & Execution Model
 
-The entire workflow is orchestrated by a `Makefile` (or a similar build tool) that automates all the steps.
+The entire workflow is orchestrated by a `Makefile` that automates all the steps.
 
 *   **Role of the `Makefile`:** To provide a consistent interface for planning and applying stacks (e.g., `make plan STACK=network/vpc ENV=dev-eu`).
 *   **Key Responsibilities:**
     1.  **Centralized `init`:** It runs `terraform init` once at the project root to download providers. The resulting `.terraform` directory is shared by all subsequent operations.
     1.  **Dependency Graph:** It inspects the source code for referenced stacks to build a dependency graph, ensuring that it plans and applies stacks in the correct order.
-    1.  **Execution Workspace:** It creates a temporary, isolated workspace directory for each env (e.g., `network/vpc/dev-eu/`).
+    1.  **Execution Workspace:** It creates a temporary, isolated workspace directory for each stack and env (e.g., `network/vpc/dev-eu/`).
     3.  **Symlinking:** It populates this workspace with symlinks to the applicable `.tf` files (the code) and `.tfvars` files (the configuration).
     4.  **Command Execution:** It runs the `tofu` command (e.g., `tofu plan`) inside this isolated workspaces (also concurrently with `make -j`).
-    6.  **Targeting:** It only plans stacks that have changes and their dependent/downstream stacks (by comparing changes against the remote-tracking branch and using make's native mtime support).
+    6.  **Change Detection:** It only plans stacks that have changes and their dependent/downstream stacks (by comparing changes against the remote-tracking branch and using make's native mtime support).
 
-  Usage examples
+## 6. Usage examples
 
-  make plan-changed                      # diff vs @{upstream}
+```sh
+  make plan-changed                        # diff vs @{upstream}
   make plan-changed DIFF_BASE=origin/main  # diff vs specific branch
   make plan-changed DIFF_BASE=HEAD~3       # diff vs 3 commits ago
   make changed DIFF_BASE=HEAD              # just list affected stacks
-  make plan                              # unchanged — plans everything with full deps
+  make plan                                # unchanged — plans everything with full deps
+```
