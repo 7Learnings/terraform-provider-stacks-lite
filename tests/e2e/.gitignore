@@ -1,5 +1,0 @@
-tfplan*
-outputs.json
-.terraform
-.terraform.lock.hcl
-*.tfrc
