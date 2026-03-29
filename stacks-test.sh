@@ -59,3 +59,21 @@ test_tfvars_precedence() {
     assert_contains '/network_2-dev-eu-.auto.tfvars: network/dev-eu.tfvars' "$output"
 }
 
+
+test_cross_stack_dependencies() {
+    # Run the script to test cross-stack dependency extraction
+    cd example/
+    output=$(bash ../stacks-gen-deps.sh dev-eu 2 network/vpc instances network/vpc/main.tf instances/main.tf)
+
+    # Check for downstream/upstream mapping
+    assert_contains 'DOWNSTREAMS_network/vpc += instances' "$output"
+    assert_contains 'UPSTREAMS_instances += network/vpc' "$output"
+
+    # Check for plan and outputs dependencies
+    assert_matches 'instances/[^/]+/tfplan.json: .*network/vpc/[^/]+/tfplan.json' "$output"
+    assert_matches 'instances/[^/]+/outputs.json: .*network/vpc/[^/]+/outputs.json' "$output"
+
+    # Check for destroy and refresh dependencies
+    assert_matches 'network/vpc/[^/]+/.destroy: destroy-instances' "$output"
+    assert_matches 'instances/[^/]+/.refresh: refresh-network/vpc' "$output"
+}
