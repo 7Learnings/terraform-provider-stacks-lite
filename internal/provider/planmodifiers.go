@@ -36,6 +36,18 @@ func (m *mapPlanModifier) PlanModifyMap(ctx context.Context, req planmodifier.Ma
 		return
 	}
 
+	planVal, diagErrors := m.computePlan(ctx, stack.ValueString(), req.StateValue)
+	for title, msg := range diagErrors {
+		resp.Diagnostics.AddError(title, msg)
+	}
+	if !resp.Diagnostics.HasError() {
+		resp.PlanValue = planVal
+	}
+}
+
+// computePlan extracts the core logic so it can be cleanly unit tested without mocking tfsdk.Plan.
+// Returns the planned map value, and any errors as map[title]message.
+func (m *mapPlanModifier) computePlan(ctx context.Context, stack string, stateValue types.Map) (types.Map, map[string]string) {
 	pd := m.providerData
 	if pd == nil {
 		pd = &StacksLiteProviderData{
@@ -44,41 +56,43 @@ func (m *mapPlanModifier) PlanModifyMap(ctx context.Context, req planmodifier.Ma
 		}
 	}
 
-	stackDir := pd.StackDirectoryPath(stack.ValueString())
+	stackDir := pd.StackDirectoryPath(stack)
 	if _, err := os.Stat(stackDir); err != nil {
 		if os.IsNotExist(err) {
-			resp.Diagnostics.AddError("Upstream stack directory not found", fmt.Sprintf("Stack directory %q does not exist in stacks root %q", stack.ValueString(), pd.StacksRoot))
-		} else {
-			resp.Diagnostics.AddError("Error accessing upstream stack directory", fmt.Sprintf("Failed to access stack directory %q: %v", stackDir, err))
+			return types.MapNull(types.StringType), map[string]string{
+				"Upstream stack directory not found": fmt.Sprintf("Stack directory %q does not exist in stacks root %q", stack, pd.StacksRoot),
+			}
 		}
-		return
+		return types.MapNull(types.StringType), map[string]string{
+			"Error accessing upstream stack directory": fmt.Sprintf("Failed to access stack directory %q: %v", stackDir, err),
+		}
 	}
 
 	planPath := pd.PlanPath(stackDir)
 	tflog.Debug(ctx, "reading upstream plan outputs", map[string]interface{}{
 		"path":  planPath,
-		"stack": stack.ValueString(),
+		"stack": stack,
 	})
 
 	data, err := os.ReadFile(planPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			if req.StateValue.IsNull() {
-				resp.PlanValue = types.MapUnknown(types.StringType)
-			} else {
-				// plan with current state if upstream planning could be skipped
-				resp.PlanValue = req.StateValue
+			if stateValue.IsNull() {
+				return types.MapUnknown(types.StringType), nil
 			}
-			return
+			// plan with current state if upstream planning could be skipped
+			return stateValue, nil
 		}
-		resp.Diagnostics.AddError("Error reading upstream plan file", fmt.Sprintf("Failed to read upstream plan from %q: %v", planPath, err))
-		return
+		return types.MapNull(types.StringType), map[string]string{
+			"Error reading upstream plan file": fmt.Sprintf("Failed to read upstream plan from %q: %v", planPath, err),
+		}
 	}
 
 	var plan Plan
 	if err := json.Unmarshal(data, &plan); err != nil {
-		resp.Diagnostics.AddError("Error unmarshaling upstream plan", fmt.Sprintf("Failed to unmarshal upstream plan from %q: %v", planPath, err))
-		return
+		return types.MapNull(types.StringType), map[string]string{
+			"Error unmarshaling upstream plan": fmt.Sprintf("Failed to unmarshal upstream plan from %q: %v", planPath, err),
+		}
 	}
 
 	outputElements := make(map[string]attr.Value)
@@ -97,16 +111,22 @@ func (m *mapPlanModifier) PlanModifyMap(ctx context.Context, req planmodifier.Ma
 			default:
 				valBytes, err := json.Marshal(output.Value)
 				if err != nil {
-					resp.Diagnostics.AddError(fmt.Sprintf("Error marshaling output '%s'", name), err.Error())
-					return
+					return types.MapNull(types.StringType), map[string]string{
+						fmt.Sprintf("Error marshaling output '%s'", name): err.Error(),
+					}
 				}
 				outputElements[name] = types.StringValue(string(valBytes))
 			}
 		}
 	}
 
-	resp.PlanValue, diags = types.MapValue(types.StringType, outputElements)
-	resp.Diagnostics.Append(diags...)
+	result, diags := types.MapValue(types.StringType, outputElements)
+	if diags.HasError() {
+		return types.MapNull(types.StringType), map[string]string{
+			"Error creating map value": fmt.Sprintf("Failed to create map from outputs: %v", diags),
+		}
+	}
+	return result, nil
 }
 
 func newMapPlanModifier() *mapPlanModifier {
