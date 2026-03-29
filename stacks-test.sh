@@ -31,3 +31,31 @@ test_env_match() {
         assert_unsuccessful_code
     done
 }
+
+test_directory_flattening() {
+    # Run the script directly to test the directory flattening logic
+    cd example/
+    output=$(bash ../stacks-gen-deps.sh dev-eu 1 network/vpc network/vpc/main.tf network/netplan.tf org/main.tf providers.tf network/vpc/subdir/below.tf)
+
+    # Check that nested files in the branch are flattened correctly
+    assert_contains '/network_vpc_main.tf: network/vpc/main.tf' "$output"
+    assert_contains '/network_netplan.tf: network/netplan.tf' "$output"
+    assert_contains '/providers.tf: providers.tf' "$output"
+    assert_not_contains 'org/main.tf' "$output"
+    assert_not_contains 'below' "$output"
+}
+
+test_tfvars_precedence() {
+    # Run the script to test tfvars parsing and precedence mapping
+    cd example/
+    output=$(bash ../stacks-gen-deps.sh dev-eu 1 network/vpc network/vpc/main.tf all.tfvars dev-eu.tfvars dev.tfvars network/all.tfvars network/dev-eu.tfvars network/eu.tfvars)
+
+    # https://opentofu.org/docs/language/values/variables/#variable-definition-precedence
+    assert_contains '/0-all-.auto.tfvars: all.tfvars' "$output"
+    assert_contains '/2-dev-.auto.tfvars: dev.tfvars' "$output"
+    assert_contains '/2-dev-eu-.auto.tfvars: dev-eu.tfvars' "$output"
+    assert_contains '/network_0-all-.auto.tfvars: network/all.tfvars' "$output"
+    assert_contains '/network_1-eu-.auto.tfvars: network/eu.tfvars' "$output"
+    assert_contains '/network_2-dev-eu-.auto.tfvars: network/dev-eu.tfvars' "$output"
+}
+
