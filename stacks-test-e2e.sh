@@ -50,6 +50,15 @@ test_plan_apply_refresh_destroy_clean() {
     assert_contains "org/$ENV" "$output"
 }
 
+test_targets() {
+    output="$($MAKE plan-network)"
+    assert_matches '\[network/vpc.*Plan.*0 to destroy' "$output"
+    output="$($MAKE plan-network/vpc)"
+    assert_matches 'Nothing to be done for.*plan-network/vpc' "$output"
+    output="$($MAKE plan-instances)"
+    assert_matches '\[instances.*Plan.*0 to destroy' "$output"
+}
+
 test_plan_changed() {
     # Run an initial full plan and apply to have a clean state
     $MAKE plan >/dev/null 2>&1

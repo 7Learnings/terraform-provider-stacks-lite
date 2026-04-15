@@ -63,6 +63,7 @@ fi
 echo "# Auto-generated dependencies for ENV: $ENV"
 ops=(plan apply destroy refresh)
 echo ".PHONY: ${ops[*]}"
+# Root targets
 for op in "${ops[@]}"; do
     echo "$op: ${STACKS[@]/#/$op-}"
 done
@@ -70,10 +71,19 @@ done
 for stack in "${STACKS[@]}"; do
     echo "" # Separator for readability
 
+    # Leaf targets
     echo "plan-$stack: $stack/\$(ENV)/tfplan.json"
     echo "apply-$stack: $stack/\$(ENV)/outputs.json"
     echo "destroy-$stack: $stack/\$(ENV)/.destroy"
     echo "refresh-$stack: $stack/\$(ENV)/.refresh"
+    # Branch targets
+    dir="$stack"
+    while [[ "$dir" == */* ]]; do
+        dir="${dir%/*}" # dirname
+        for op in "${ops[@]}"; do
+            echo "$op-$dir: $op-$stack"
+        done
+    done
 
     # 4. Build the path hierarchy pattern to match any inherited files
     pattern="$(along_branch_re "$stack")"
