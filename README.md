@@ -32,7 +32,7 @@ The project uses a hierarchical directory structure where code (`.tf`) and confi
 stacks/
 ├── Makefile                            # The automation driver for the project (`include stacks-lite/stacks.mk`).
 ├── stacks-lite                         # The git submodule of this repo.
-├── backend.tf                          # A global Terraform backend configuration shared by all stacks.
+├── backend.tf                          # A global Terraform backend configuration shared by all stacks (can be overridden).
 ├── providers.tf                        # A global provider configuration shared by all stacks.
 ├── all.tfvars                          # Variables for all stacks common to all envs.
 ├── dev.tfvars                          # Variables for all stacks used in dev envs.
@@ -65,7 +65,7 @@ This walk-through explains how the code and configuration for a single stack are
 
 #### Flattening (`.tf` Layers)
 
-The tooling assembles a stack's "layer" by collecting *all* `.tf` files from the project root down to the stack's directory. This means you can structure your code within a stack directory however you see fit (e.g., `main.tf`, `variables.tf`, etc.); all `.tf` files found will be included.
+The tooling assembles a stack's "layer" by collecting *all* `.tf` files from the project root down to the stack's directory. This means you can structure your code within a stack directory however you see fit (e.g., `main.tf`, `variables.tf`, etc.); all regular `.tf` files found will be included. Override files (`*_override.tf` and `*_override.<env>.tf`) are also supported and are described in more detail below.
 
 For the `vpc` stack, the aggregated layer would include:
 *   `./backend.tf`
@@ -127,6 +127,17 @@ The automation tooling would process these files in the following order (from lo
 Variables in files loaded later override those from files loaded earlier. All of them take precedence over environment variables (discouraging impure ad-hoc builds).
 
 Note: This is implemented by prefixing files with their path and their reverse index of the tag match, e.g. `dev-eu.tfvars` is symlinked to `_3-dev-eu.auto.tfvars`, while `network/eu.tfvars` would be symlinked to `network_2-eu.auto.tfvars`.
+
+#### Overrides (`*_override.tf` and `*_override.<env>.tf`)
+
+While `stacks-lite` encourages managing environment differences with `.tfvars`, it also supports TF's [override file mechanism](https://opentofu.org/docs/language/files/override/) for cases where structural changes between environments are unavoidable. We recommend using override files only as a last resort, as they can make the configuration harder to understand and maintain.
+
+Overrides are loaded with the following precedence (from lowest to highest):
+
+1.  **Path Specificity:** Overrides in deeper directories have higher precedence (e.g., `network/vpc/backend_override.tf` overrides a `backend_override.tf` in the root).
+2.  **Environment Specificity:** Environment-specific overrides take precedence over generic ones. The same matching logic as for `.tfvars` is used for files named `*_override.<env>.tf`. For an `ENV` of `dev-eu`, an override file named `backend_override.dev-eu.tf` would take precedence over `backend_override.dev.tf` and a generic `backend_override.tf`.
+
+For example, to use a different backend for the `dev` environment, you could create a file named `backend_override.dev.tf` at the root of your project.
 
 #### The "Escape Hatch": Conditional Resources
 
