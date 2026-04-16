@@ -138,7 +138,7 @@ $(addsuffix $(ENV)/zzz_stacks.auto.tfvars,$(STACKS)): %/$(ENV)/zzz_stacks.auto.t
 		echo 'stack = "$*"'; \
 	} > $@
 
-$(addsuffix $(ENV)/_vars.auto.tf,$(STACKS)): %/$(ENV)/_vars.auto.tf:
+$(addsuffix $(ENV)/_vars.auto.tf,$(STACKS)): %/$(ENV)/_vars.auto.tf: %/$(ENV) # depend on dir to rebuild on (symlink) deletion
 	$(Q){\
 		echo "# auto-generated variable declarations for $*/$(ENV)"; \
 		sed -nE 's|^\s*([a-zA-Z0-9_-]+)\s*=.*$$|variable "\1" {}|p' $(filter %.tfvars,$^) | sort -u; \
@@ -164,7 +164,7 @@ $(addsuffix $(ENV)/modules,$(STACKS)): %/$(ENV)/modules: modules
 
 .PHONY: clean
 clean:
-	rm -rf $(STACKS:%/=%/$(ENV)) _modules.auto.tf
+	rm -rf $(STACKS:%/=%/$(ENV)) _modules.auto.tf .deps/$(ENV).d
 
 .PHONY: deepclean
 deepclean: clean
@@ -174,16 +174,22 @@ deepclean: clean
 # --- Dynamic Dependency Logic ---
 
 # Included will be rebuild before inclusion in the same make invocation (similar to Makefile rules)
-deps-$(ENV).d: $(dir $(lastword $(MAKEFILE_LIST)))stacks-gen-deps.sh $(lastword $(MAKEFILE_LIST)) $(FILES)
+# Depend on all file directories as well to rebuild stale dependencies on file deletion.
+# Also purge any now dangling symlinks from previous run.
+.deps/$(ENV).d: $(dir $(lastword $(MAKEFILE_LIST)))stacks-gen-deps.sh $(lastword $(MAKEFILE_LIST)) $(FILES) $(sort $(dir $(FILES))) # depend on dir to rebuild on deletion
+	$(Q)if [ -f $@ ]; then \
+	    awk -v ORS='\0' -v OFS='\0' -v ENV='$(ENV)' '/_vars\.auto\.tf:/{gsub(/\$$\(ENV\)/,ENV); sub(/.*_vars\.auto\.tf:[[:space:]]*/,""); if(NF){$$1=$$1; print}}' $@ | find -files0-from - -xtype l -delete 2>/dev/null || true; \
+	fi
+	$(Q)mkdir -p $(@D)
 	$(Q)./$< "$(ENV)" $(words $(STACKS)) $(STACKS:%/=%) $(FILES) > $@
-	$(Q)echo 'include deps-$(ENV).d' > .check-cycles-$(ENV).mk
-	$(Q)! $(MAKE) -f .check-cycles-$(ENV).mk plan -n 2>&1 | grep -Fi Circular
-	$(Q)rm .check-cycles-$(ENV).mk
+	$(Q)echo 'include $@' > $(@D)/check-cycles-$(ENV).mk
+	$(Q)! $(MAKE) -f $(@D)/check-cycles-$(ENV).mk plan -n 2>&1 | grep -Fi Circular
+	$(Q)rm $(@D)/check-cycles-$(ENV).mk
 
 # used to break cyclic dependency between CHANGED_STACKS and deps.d
 .SECONDEXPANSION:
 
-include deps-$(ENV).d
+include .deps/$(ENV).d
 
 # --- Changed Stacks Detection ---
 

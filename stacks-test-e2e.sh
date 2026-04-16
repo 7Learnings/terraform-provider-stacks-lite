@@ -100,3 +100,13 @@ test_failed_apply_stale_plan() {
     # cleanup
     git checkout instances/main.tf
 }
+
+test_file_deletion() {
+    touch network/vpc/dummy.tf
+    git add network/vpc/dummy.tf
+    output=$($MAKE plan-network/vpc)
+    assert_matches '\[network/vpc.*Plan.*0 to destroy' "$output"
+    git rm -f network/vpc/dummy.tf
+    output=$($MAKE plan-network/vpc)
+    assert_matches '\[network/vpc.*Plan.*0 to destroy' "$output"
+}

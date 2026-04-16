@@ -1,4 +1,4 @@
-deps*.d
+/.deps
 _modules.auto.tf
 
 # Created by https://www.toptal.com/developers/gitignore/api/terraform
