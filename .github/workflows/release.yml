@@ -26,11 +26,17 @@ jobs:
           go-version-file: 'go.mod'
           cache: true
       - name: Import GPG key
-        uses: crazy-max/ghaction-import-gpg@2dc316deee8e90f13e1a351ab510b4d5bc0c82cd # v7.0.0
-        id: import_gpg
-        with:
-          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
-          passphrase: ${{ secrets.PASSPHRASE }}
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          PASSPHRASE: ${{ secrets.PASSPHRASE }}
+        run: |
+          gpg --batch --import --yes <<<"$GPG_PRIVATE_KEY"
+          FINGERPRINT=$(gpg --with-colons --list-keys | grep '^pub' | cut -d: -f5 | head -n 1)
+          KEYGRIP=$(gpg --with-colons --with-keygrip --list-secret-keys | grep '^grp' | cut -d: -f10 | head -n 1)
+          echo "allow-preset-passphrase" >> ~/.gnupg/gpg-agent.conf
+          gpg-connect-agent reloadagent /bye
+          /usr/lib/gnupg/gpg-preset-passphrase --preset "$KEYGRIP" <<<"$PASSPHRASE"
+          echo "GPG_FINGERPRINT=$FINGERPRINT" >> $GITHUB_ENV
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@ec59f474b9834571250b370d4735c50f8e2d1e29 # v7.0.0
         with:
@@ -38,4 +44,3 @@ jobs:
         env:
           # GitHub sets the GITHUB_TOKEN secret automatically.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GPG_FINGERPRINT: ${{ steps.import_gpg.outputs.fingerprint }}
