@@ -34,7 +34,7 @@ STACKS := $(shell printf '%s\n' $(sort $(filter-out ./ modules/%,$(dir $(FILES))
 # --- Rules ---
 
 # plan
-$(addsuffix $(ENV)/tfplan.json,$(STACKS)): %/$(ENV)/tfplan.json: %/$(ENV)/.terraform
+$(addsuffix $(ENV)/tfplan.json,$(STACKS)): %/$(ENV)/tfplan.json: %/$(ENV)/.terraform %/$(ENV)/modules
 	$(Q)skip=false; \
 	if [ -n "$(filter plan-changed apply-changed,$(MAKECMDGOALS))" ] && \
 	   [ -z "$(filter $*,$(_DIRECTLY_CHANGED))" ] && [ -f "$@" ]; then \
@@ -74,7 +74,7 @@ $(addsuffix $(ENV)/.destroy,$(STACKS)): %/$(ENV)/.destroy:
 	$(Q)cd $(@D) && $(TF) destroy -parallelism=$(TF_PARALLELISM) $(P)
 
 # refresh (actually produces outputs.json for downstream stacks)
-$(addsuffix $(ENV)/.refresh,$(STACKS)): %/$(ENV)/.refresh: %/$(ENV)/_vars.auto.tf %/$(ENV)/.terraform
+$(addsuffix $(ENV)/.refresh,$(STACKS)): %/$(ENV)/.refresh: %/$(ENV)/.terraform
 	$(Q)echo "Refreshing $*" $(P)
 	$(Q)cd $(@D) && $(TF) refresh -parallelism=$(TF_PARALLELISM) $(P) && \
 	    $(TF) output -json > outputs.json
@@ -94,33 +94,36 @@ $(addsuffix $(ENV),$(STACKS)): # working directories
 # --- Terraform Init ---
 
 # Reuse same terraform init for all stacks (globally locked providers and modules)
-# TODO: gather and import used modules so they don't have to be declared in providers.tf
-$(addsuffix $(ENV)/.terraform,$(STACKS)): %/$(ENV)/.terraform: | .terraform %/$(ENV)/.terraform.lock.hcl %/$(ENV)
-	$(Q)ln --relative -sf $(firstword $|) $(@D)/
-	$(Q)echo $(@F) >> $(@D)/.gitignore
+$(addsuffix $(ENV)/.terraform,$(STACKS)): %/$(ENV)/.terraform: | .terraform %/$(ENV)/modules %/$(ENV)/_vars.auto.tf %/$(ENV)
+	$(Q)ln --relative -sf .terraform{,.lock.hcl,rc} $(@D)/
+	$(Q)echo .terraform{,.lock.hcl,rc} >> $(@D)/.gitignore
 
-$(addsuffix $(ENV)/.terraform.lock.hcl,$(STACKS)): %/$(ENV)/.terraform.lock.hcl: | .terraform.lock.hcl %/$(ENV)/.terraformrc %/$(ENV)
-	$(Q)ln --relative -sf $(firstword $|) $(@D)/
-	$(Q)echo $(@F) >> $(@D)/.gitignore
+$(addsuffix $(ENV)/modules,$(STACKS)): %/$(ENV)/modules: modules | %/$(ENV)
+	$(Q)ln --relative --no-target-directory -sf $< $@
 
-$(addsuffix $(ENV)/.terraformrc,$(STACKS)): %/$(ENV)/.terraformrc: | .terraformrc %/$(ENV)
-	$(Q)ln --relative -sf $(firstword $|) $(@D)/
-	$(Q)echo $(@F) >> $(@D)/.gitignore
-
-.terraform .terraform.lock.hcl: _modules.auto.tf | .terraformrc
+# here we don't depend on folders to detect file deletions as that would create a circular
+# dependency (due to the $(ENV)/.terraform symlink) and also because module/provider deletion does
+# not require a re-initialization
+.terraform: .terraformrc $(filter %.tf,$(FILES)) $(sort $(dir $(FILES)))
 # init all local modules from root "stack"
-	$(Q)$(TF) init -var=stacks_root=. -var=stacks_env=$(STACKS_ENV) -var=stack=root
-	$(Q)touch $@
-
-_modules.auto.tf: $(addsuffix $(ENV)/.modules.auto.tf,$(STACKS))
-# run extract-modules again to dedup identical modules across stacks
+	$(Q)mkdir -p init/$(ENV)/
+# extract all modules across stacks
 	$(Q){\
 		echo 'variable "stacks_root" {}'; \
 		echo 'variable "stacks_env" {}'; \
 		echo 'variable "stack" {}'; \
-		awk -f $(dir $(filter %/stacks.mk,$(MAKEFILE_LIST)))stacks-extract-modules.awk $^; \
-	} > $@.tmp
-	$(Q)cmp -s $@.tmp $@ && rm $@.tmp || mv $@.tmp $@
+	} > init/$(ENV)/_vars.auto.tf
+	$(Q)awk -f $(dir $(filter %/stacks.mk,$(MAKEFILE_LIST)))stacks-extract-modules.awk $(filter %.tf,$(FILES)) > init/$(ENV)/modules.tf
+	$(Q)sed -En '/terraform \{/,/^\}$$/p' $(filter %.tf,$(FILES)) > init/$(ENV)/tf.tf
+	$(Q)ln --relative -sf modules init/$(ENV)/
+	$(Q)if [ -f .terraform.lock.hcl ]; then cp .terraform.lock.hcl init/$(ENV)/; fi
+	$(Q)cd init/$(ENV)/ && export TF_CLI_CONFIG_FILE=../../.terraformrc && $(TF) init -var=stacks_root=../.. -var=stacks_env=$(STACKS_ENV) -var=stack=init
+# patch path to relative modules to use consistent modules symlinks from workdir (to support duplicate modules at different stack depths)
+	$(Q)if [ -s init/$(ENV)/modules.tf ]; then sed -Ei 's|Dir":"../../modules|Dir":"modules|g' init/$(ENV)/.terraform/modules/modules.json; fi
+	$(Q)rm -rf .terraform{,.lock.hcl} && mv init/$(ENV)/.terraform{,.lock.hcl} .
+	$(Q)rm -rf init/$(ENV)
+# touch to be newer than ./
+	$(Q)touch $@
 
 # built provider until it's published
 PROVIDER_PATH:=registry.opentofu.org/7learnings/stacks-lite/0.1.0/linux_amd64/terraform-provider-stacks-lite_v0.1.0
@@ -145,13 +148,6 @@ $(addsuffix $(ENV)/_vars.auto.tf,$(STACKS)): %/$(ENV)/_vars.auto.tf: %/$(ENV) # 
 	} > $@
 	$(Q)printf '%s\n' $(^F) $(@F) >> $(@D)/.gitignore
 
-$(addsuffix $(ENV)/.modules.auto.tf,$(STACKS)): %/$(ENV)/.modules.auto.tf: $(dir $(lastword $(MAKEFILE_LIST)))stacks-extract-modules.awk %/$(ENV)/_vars.auto.tf %/$(ENV)/modules
-	$(Q)awk -f $< $(@D)/*.tf > $@.tmp
-	$(Q)cmp -s $@.tmp $@ && rm $@.tmp || mv $@.tmp $@
-
-$(addsuffix $(ENV)/modules,$(STACKS)): %/$(ENV)/modules: modules
-	$(Q)ln --relative --no-target-directory -sf $< $@
-
 # Resort to implicit rules for the symlinks to to avoid multiple wildcard targets or
 # having to stamp out a macro for each stack (https://stackoverflow.com/a/74450187)
 %.tf:
@@ -164,11 +160,11 @@ $(addsuffix $(ENV)/modules,$(STACKS)): %/$(ENV)/modules: modules
 
 .PHONY: clean
 clean:
-	rm -rf $(STACKS:%/=%/$(ENV)) _modules.auto.tf .deps/$(ENV).d
+	rm -rf $(STACKS:%/=%/$(ENV)) .deps/$(ENV).d
 
 .PHONY: deepclean
 deepclean: clean
-	rm -rf .terraform .terraformrc _modules.auto.tf $(dir $(filter %/stacks.mk,$(MAKEFILE_LIST)))$(PROVIDER_PATH)
+	rm -rf .terraform .terraformrc $(dir $(filter %/stacks.mk,$(MAKEFILE_LIST)))$(PROVIDER_PATH)
 
 
 # --- Dynamic Dependency Logic ---
