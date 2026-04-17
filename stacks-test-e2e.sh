@@ -110,23 +110,3 @@ test_file_deletion() {
     output=$($MAKE plan-network/vpc)
     assert_matches '\[network/vpc.*Plan.*0 to destroy' "$output"
 }
-
-test_backend_override() {
-    # create an override file for the backend
-    echo -e 'terraform {\nbackend "local" {\npath = "terraform.tfstate.dev-eu"\n}\n}' > dev-eu.backend_override.tf
-    git add dev-eu.backend_override.tf
-
-    $MAKE apply
-
-    # assert the state file is at the new location for a few stacks
-    assert_file_exists 'network/vpc/dev-eu/terraform.tfstate.dev-eu'
-    assert_file_not_exists 'network/vpc/dev-eu/terraform.tfstate'
-    assert_file_exists 'instances/dev-eu/terraform.tfstate.dev-eu'
-    assert_file_not_exists 'instances/dev-eu/terraform.tfstate'
-    exit 1
-
-    # remove override and clean up before other tests run
-    git rm backend_override.dev-eu.tf
-    $MAKE clean >/dev/null 2>&1
-    assert_empty "$(git status --porcelain -- .)"
-}

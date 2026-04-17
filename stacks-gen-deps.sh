@@ -115,9 +115,9 @@ for stack in "${STACKS[@]}"; do
     for f in "${FILES[@]}"; do
         if [[ $f =~ $pattern\.tfvars$ ]]; then
             base="$f"
-            [[ $base == */* ]] && base="${f##*/}" # basename
-            env="${base%.tfvars}"
-            if prec=$(env_match "$env" "$ENV"); then
+            [[ $base == */* ]] && base="${f##*/}" # dirname
+            base="${base%.tfvars}"
+            if prec=$(env_match "$base" "$ENV"); then
                 if [[ $f == */* ]]; then
                     dir="${f%/*}" # dirname
                 else
@@ -125,31 +125,10 @@ for stack in "${STACKS[@]}"; do
                 fi
                 # e.g. network_2-eu-.auto.tfvars to ensure lexical ordering
                 # https://opentofu.org/docs/language/values/variables/#variable-definition-precedence
-                deps["$f"]="${dir//\//_}${dir:+_}$prec-${env}-.auto.tfvars"
+                deps["$f"]="${dir//\//_}${dir:+_}$prec-${base}-.auto.tfvars"
             fi
         fi
     done
-
-    # Filter .tf overrides with exact ENV matching logic
-    for f in "${FILES[@]}"; do
-        if [[ $f =~ $pattern\.tf$ ]] && [[ $f =~ _override\.([^.]+)\.tf$ ]]; then
-            base="$f"
-            [[ $base == */* ]] && base="${f##*/}" # basename
-            base="${base%.*.tf}" # strip env and suffix
-            env="${BASH_REMATCH[1]}"
-            if prec=$(env_match "$env" "$ENV"); then
-                if [[ $f == */* ]]; then
-                    dir="${f%/*}" # dirname
-                else
-                    dir=''
-                fi
-                # e.g. network_2-eu-backend_override.tf to ensure lexical ordering
-                # https://opentofu.org/docs/language/files/override/
-                deps["$f"]="${dir//\//_}${dir:+_}$prec-${env}-${base}.tf"
-            fi
-        fi
-    done
-
     # symlink deps for implicit target
     echo -e '# Generated variable declarations'
     echo "$stack/\$(ENV)/tfplan.json: $stack/\$(ENV)/_vars.auto.tf"
