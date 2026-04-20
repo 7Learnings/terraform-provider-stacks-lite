@@ -83,7 +83,6 @@ $(addsuffix $(ENV)/.refresh,$(STACKS)): %/$(ENV)/.refresh: %/$(ENV)/.terraform
 ALL_TARGETS:=$(addsuffix $(ENV)/outputs.json,$(STACKS)) $(addsuffix $(ENV)/tfplan.json,$(STACKS)) $(addsuffix $(ENV)/.destroy,$(STACKS)) $(addsuffix $(ENV)/.refresh,$(STACKS))
 $(ALL_TARGETS): export STACKS_ROOT=$(shell revpath $(@D))
 $(ALL_TARGETS): export STACKS_ENV=$(ENV)
-$(ALL_TARGETS): export TF_CLI_CONFIG_FILE=.terraformrc
 
 # --- Working Directories ---
 
@@ -104,7 +103,7 @@ $(addsuffix $(ENV)/modules,$(STACKS)): %/$(ENV)/modules: modules | %/$(ENV)
 # here we don't depend on folders to detect file deletions as that would create a circular
 # dependency (due to the $(ENV)/.terraform symlink) and also because module/provider deletion does
 # not require a re-initialization
-.terraform: .terraformrc $(filter %.tf,$(FILES)) $(sort $(dir $(FILES)))
+.terraform: $(filter %.tf,$(FILES)) $(sort $(dir $(FILES)))
 # init all local modules from root "stack"
 	$(Q)mkdir -p init/$(ENV)/
 # extract all modules across stacks
@@ -117,21 +116,13 @@ $(addsuffix $(ENV)/modules,$(STACKS)): %/$(ENV)/modules: modules | %/$(ENV)
 	$(Q)sed -En '/terraform \{/,/^\}$$/p' $(filter %.tf,$(FILES)) > init/$(ENV)/tf.tf
 	$(Q)ln --relative -sf modules init/$(ENV)/
 	$(Q)if [ -f .terraform.lock.hcl ]; then cp .terraform.lock.hcl init/$(ENV)/; fi
-	$(Q)cd init/$(ENV)/ && export TF_CLI_CONFIG_FILE=../../.terraformrc && $(TF) init -var=stacks_root=../.. -var=stacks_env=$(STACKS_ENV) -var=stack=init
+	$(Q)cd init/$(ENV)/ && $(TF) init -var=stacks_root=../.. -var=stacks_env=$(STACKS_ENV) -var=stack=init
 # patch path to relative modules to use consistent modules symlinks from workdir (to support duplicate modules at different stack depths)
 	$(Q)if [ -s init/$(ENV)/modules.tf ]; then sed -Ei 's|Dir":"../../modules|Dir":"modules|g' init/$(ENV)/.terraform/modules/modules.json; fi
 	$(Q)rm -rf .terraform{,.lock.hcl} && mv init/$(ENV)/.terraform{,.lock.hcl} .
 	$(Q)rm -rf init/$(ENV)
 # touch to be newer than ./
 	$(Q)touch $@
-
-# built provider until it's published
-PROVIDER_PATH:=registry.opentofu.org/7learnings/stacks-lite/0.1.0/linux_amd64/terraform-provider-stacks-lite_v0.1.0
-.terraformrc: $(dir $(filter %/stacks.mk,$(MAKEFILE_LIST)))$(PROVIDER_PATH)
-	$(Q)echo -e 'provider_installation { filesystem_mirror { path = "$(abspath $(dir $(filter %/stacks.mk,$(MAKEFILE_LIST))))" include=["registry.opentofu.org/7learnings/stacks-lite"] } direct {} }\nplugin_cache_dir   = "$$HOME/.local/share/opentofu/plugins"' > $@
-
-$(dir $(filter %/stacks.mk,$(MAKEFILE_LIST)))$(PROVIDER_PATH):
-	$(Q)cd $(dir $(filter %/stacks.mk,$(MAKEFILE_LIST))) && go build -o $(PROVIDER_PATH)
 
 $(addsuffix $(ENV)/zzz_stacks.auto.tfvars,$(STACKS)): %/$(ENV)/zzz_stacks.auto.tfvars:
 	$(Q){\
@@ -164,7 +155,7 @@ clean:
 
 .PHONY: deepclean
 deepclean: clean
-	rm -rf .terraform .terraformrc $(dir $(filter %/stacks.mk,$(MAKEFILE_LIST)))$(PROVIDER_PATH)
+	rm -rf .terraform $(dir $(filter %/stacks.mk,$(MAKEFILE_LIST)))$(PROVIDER_PATH)
 
 
 # --- Dynamic Dependency Logic ---

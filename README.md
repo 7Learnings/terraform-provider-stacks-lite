@@ -20,8 +20,7 @@ Based on an idea from [cisco-open/stacks: Stacks, the Terraform code pre-process
 Install as git submodule then include the stacks.mk in your top-level Makefile.
 
 Make sure you have the following tools installed:
-* OpenTofu 1.12 (for [-json-into](https://opentofu.org/blog/dual-command-output-streams/))
-* Go
+* OpenTofu/Terraform
 * GNUMake
 * `revpath` (part of [imake](https://en.wikipedia.org/wiki/Imake))
 
