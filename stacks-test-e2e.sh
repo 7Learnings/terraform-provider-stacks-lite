@@ -8,7 +8,7 @@ set_up() {
 }
 
 tear_down() {
-    $MAKE deepclean && rm -rf ../registry.opentofu.org
+    $MAKE deepclean
     rm .terraform.lock.hcl
     assert_empty "$(git status --porcelain -- .)"
 }
