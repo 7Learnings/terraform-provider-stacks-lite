@@ -14,7 +14,8 @@ export CLICOLOR_FORCE=1
 .SHELLFLAGS := -o pipefail -c
 P = 2>&1 | awk -v s="$*" '{ printf "[%-16s] %s\n", s, $$0; fflush() }'
 
-FILES:=$(filter-out %modules.auto.tf,$(shell git ls-files -- '*.tf' '*.tfvars'))
+# Wrap in wildcard to exclude unstaged deletions
+FILES:=$(wildcard $(shell git ls-files -- '*.tf' '*.tfvars'))
 
 ifeq ($(ENV),)
   $(error 'Must set ENV variable')
@@ -100,10 +101,7 @@ $(addsuffix $(ENV)/.terraform,$(STACKS)): %/$(ENV)/.terraform: | .terraform %/$(
 $(addsuffix $(ENV)/modules,$(STACKS)): %/$(ENV)/modules: modules | %/$(ENV)
 	$(Q)ln --relative --no-target-directory -sf $< $@
 
-# here we don't depend on folders to detect file deletions as that would create a circular
-# dependency (due to the $(ENV)/.terraform symlink) and also because module/provider deletion does
-# not require a re-initialization
-.terraform: $(filter %.tf,$(FILES)) $(sort $(dir $(FILES)))
+.terraform: .deps/$(ENV).modules.tf .deps/$(ENV).tf.tf
 # init all local modules from root "stack"
 	$(Q)mkdir -p init/$(ENV)/
 # extract all modules across stacks
@@ -112,8 +110,8 @@ $(addsuffix $(ENV)/modules,$(STACKS)): %/$(ENV)/modules: modules | %/$(ENV)
 		echo 'variable "stacks_env" {}'; \
 		echo 'variable "stack" {}'; \
 	} > init/$(ENV)/_vars.auto.tf
-	$(Q)awk -f $(dir $(filter %/stacks.mk,$(MAKEFILE_LIST)))stacks-extract-modules.awk $(filter %.tf,$(FILES)) > init/$(ENV)/modules.tf
-	$(Q)sed -En '/terraform \{/,/^\}$$/p' $(filter %.tf,$(FILES)) > init/$(ENV)/tf.tf
+	$(Q)cp .deps/$(ENV).modules.tf init/$(ENV)/modules.tf
+	$(Q)cp .deps/$(ENV).tf.tf init/$(ENV)/tf.tf
 	$(Q)ln --relative -sf modules init/$(ENV)/
 	$(Q)if [ -f .terraform.lock.hcl ]; then cp .terraform.lock.hcl init/$(ENV)/; fi
 	$(Q)cd init/$(ENV)/ && $(TF) init -var=stacks_root=../.. -var=stacks_env=$(STACKS_ENV) -var=stack=init
@@ -121,8 +119,6 @@ $(addsuffix $(ENV)/modules,$(STACKS)): %/$(ENV)/modules: modules | %/$(ENV)
 	$(Q)if [ -s init/$(ENV)/modules.tf ]; then sed -Ei 's|Dir":"../../modules|Dir":"modules|g' init/$(ENV)/.terraform/modules/modules.json; fi
 	$(Q)rm -rf .terraform{,.lock.hcl} && mv init/$(ENV)/.terraform{,.lock.hcl} .
 	$(Q)rm -rf init/$(ENV)
-# touch to be newer than ./
-	$(Q)touch $@
 
 $(addsuffix $(ENV)/zzz_stacks.auto.tfvars,$(STACKS)): %/$(ENV)/zzz_stacks.auto.tfvars:
 	$(Q){\
@@ -132,7 +128,7 @@ $(addsuffix $(ENV)/zzz_stacks.auto.tfvars,$(STACKS)): %/$(ENV)/zzz_stacks.auto.t
 		echo 'stack = "$*"'; \
 	} > $@
 
-$(addsuffix $(ENV)/_vars.auto.tf,$(STACKS)): %/$(ENV)/_vars.auto.tf: %/$(ENV) # depend on dir to rebuild on (symlink) deletion
+$(addsuffix $(ENV)/_vars.auto.tf,$(STACKS)): %/$(ENV)/_vars.auto.tf: .deps/$(ENV).d # depend on deps file to rebuild on file changes and deletion
 	$(Q){\
 		echo "# auto-generated variable declarations for $*/$(ENV)"; \
 		sed -nE 's|^\s*([a-zA-Z0-9_-]+)\s*=.*$$|variable "\1" {}|p' $(filter %.tfvars,$^) | sort -u; \
@@ -161,17 +157,29 @@ deepclean: clean
 # --- Dynamic Dependency Logic ---
 
 # Included will be rebuild before inclusion in the same make invocation (similar to Makefile rules)
-# Depend on all file directories as well to rebuild stale dependencies on file deletion.
 # Also purge any now dangling symlinks from previous run.
-.deps/$(ENV).d: $(dir $(lastword $(MAKEFILE_LIST)))stacks-gen-deps.sh $(lastword $(MAKEFILE_LIST)) $(FILES) $(sort $(dir $(FILES))) # depend on dir to rebuild on deletion
+.deps/$(ENV).d: $(dir $(lastword $(MAKEFILE_LIST)))stacks-gen-deps.sh $(lastword $(MAKEFILE_LIST)) .deps/$(ENV).files
 	$(Q)if [ -f $@ ]; then \
 	    awk -v ORS='\0' -v OFS='\0' -v ENV='$(ENV)' '/_vars\.auto\.tf:/{gsub(/\$$\(ENV\)/,ENV); sub(/.*_vars\.auto\.tf:[[:space:]]*/,""); if(NF){$$1=$$1; print}}' $@ | find -files0-from - -xtype l -delete 2>/dev/null || true; \
 	fi
-	$(Q)mkdir -p $(@D)
 	$(Q)./$< "$(ENV)" $(words $(STACKS)) $(STACKS:%/=%) $(FILES) > $@
 	$(Q)echo 'include $@' > $(@D)/check-cycles-$(ENV).mk
 	$(Q)! $(MAKE) -f $(@D)/check-cycles-$(ENV).mk plan -n 2>&1 | grep -Fi Circular
 	$(Q)rm $(@D)/check-cycles-$(ENV).mk
+
+.deps/$(ENV).files: $(sort $(dir $(FILES))) # depend on dirs to update on file deletion
+	$(Q)mkdir -p $(@D)
+	$(Q)echo '$(FILES)' | cmp -s - $@ || echo '$(FILES)' > $@
+
+.deps/$(ENV).modules.tf: $(filter %.tf,$(FILES))
+	$(Q)awk -f $(dir $(filter %/stacks.mk,$(MAKEFILE_LIST)))stacks-extract-modules.awk $^ > $@.tmp
+	$(Q)cmp -s $@.tmp $@ || mv $@.tmp $@
+	$(Q)rm -f $@.tmp
+
+.deps/$(ENV).tf.tf: $(filter %.tf,$(FILES))
+	$(Q)sed -En '/terraform \{/,/^\}$$/p' $^ > $@.tmp
+	$(Q)cmp -s $@.tmp $@ || mv $@.tmp $@
+	$(Q)rm -f $@.tmp
 
 # used to break cyclic dependency between CHANGED_STACKS and deps.d
 .SECONDEXPANSION:
