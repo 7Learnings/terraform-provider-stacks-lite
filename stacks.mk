@@ -84,6 +84,9 @@ $(addsuffix $(ENV)/.refresh,$(STACKS)): %/$(ENV)/.refresh: %/$(ENV)/.terraform
 ALL_TARGETS:=$(addsuffix $(ENV)/outputs.json,$(STACKS)) $(addsuffix $(ENV)/tfplan.json,$(STACKS)) $(addsuffix $(ENV)/.destroy,$(STACKS)) $(addsuffix $(ENV)/.refresh,$(STACKS))
 $(ALL_TARGETS): export STACKS_ROOT=$(shell revpath $(@D))
 $(ALL_TARGETS): export STACKS_ENV=$(ENV)
+# separate stack states (gcp/net/vpc → gcp-net-vpc) without reinitializing the backend
+# https://opentofu.org/docs/language/state/workspaces/
+$(ALL_TARGETS): export TF_WORKSPACE=$(subst /,-,$(patsubst %/,%,$(dir $(@D))))
 
 # --- Working Directories ---
 
@@ -114,7 +117,7 @@ $(addsuffix $(ENV)/modules,$(STACKS)): %/$(ENV)/modules: modules | %/$(ENV)
 	$(Q)cp .deps/$(ENV).tf.tf init/$(ENV)/tf.tf
 	$(Q)ln --relative -sf modules init/$(ENV)/
 	$(Q)if [ -f .terraform.lock.hcl ]; then cp .terraform.lock.hcl init/$(ENV)/; fi
-	$(Q)cd init/$(ENV)/ && $(TF) init -var=stacks_root=../.. -var=stacks_env=$(STACKS_ENV) -var=stack=init
+	$(Q)cd init/$(ENV)/ && TF_WORKSPACE=init $(TF) init -var=stacks_root=../.. -var=stacks_env=$(STACKS_ENV) -var=stack=init
 # patch path to relative modules to use consistent modules symlinks from workdir (to support duplicate modules at different stack depths)
 	$(Q)if [ -s init/$(ENV)/modules.tf ]; then sed -Ei 's|Dir":"../../modules|Dir":"modules|g' init/$(ENV)/.terraform/modules/modules.json; fi
 	$(Q)rm -rf .terraform{,.lock.hcl} && mv init/$(ENV)/.terraform{,.lock.hcl} .
