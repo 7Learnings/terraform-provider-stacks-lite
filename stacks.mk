@@ -21,7 +21,7 @@ ifeq ($(ENV),)
   $(error 'Must set ENV variable')
 endif
 ifneq ($(MAKECMDGOALS),clean)
-  UNTRACKED:=$(filter-out %modules.auto.tf,$(shell git ls-files --other --exclude-standard -- '*.tf' '*.tfvars' '*.tfvars.json'))
+  UNTRACKED:=$(filter-out .deps/%.tf,$(shell git ls-files --other --exclude-standard -- '*.tf' '*.tfvars' '*.tfvars.json'))
   ifneq ($(UNTRACKED),)
     $(error 'Found untracked (or deleted) files: $(UNTRACKED)')
   endif
