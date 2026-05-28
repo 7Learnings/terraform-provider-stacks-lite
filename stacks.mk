@@ -80,9 +80,13 @@ $(addsuffix $(ENV)/.refresh,$(STACKS)): %/$(ENV)/.refresh: %/$(ENV)/.terraform
 	$(Q)cd $(@D) && $(TF) refresh -parallelism=$(TF_PARALLELISM) $(P) && \
 	    $(TF) output -json > outputs.json
 
+# https://stackoverflow.com/a/51874794
+SPACE:= $() $()
+
 # export stacks-lite provider config as environment variables
 ALL_TARGETS:=$(addsuffix $(ENV)/outputs.json,$(STACKS)) $(addsuffix $(ENV)/tfplan.json,$(STACKS)) $(addsuffix $(ENV)/.destroy,$(STACKS)) $(addsuffix $(ENV)/.refresh,$(STACKS))
-$(ALL_TARGETS): export STACKS_ROOT=$(shell revpath $(@D))
+# make equivalent of $(shell revpath $(@D))
+$(ALL_TARGETS): export STACKS_ROOT=$(subst $(SPACE),/,$(foreach w,$(subst /,$(SPACE),$(@D)),..))
 $(ALL_TARGETS): export STACKS_ENV=$(ENV)
 # separate stack states (gcp/net/vpc → gcp-net-vpc) without reinitializing the backend
 # https://opentofu.org/docs/language/state/workspaces/

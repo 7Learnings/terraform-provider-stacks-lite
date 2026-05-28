@@ -22,7 +22,6 @@ Install as git submodule then include the stacks.mk in your top-level Makefile.
 Make sure you have the following tools installed:
 * OpenTofu/Terraform
 * GNUMake
-* `revpath` (part of [imake](https://en.wikipedia.org/wiki/Imake))
 
 ## 3. Directory Layout
 
