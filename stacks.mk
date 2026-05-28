@@ -100,6 +100,9 @@ $(addsuffix $(ENV),$(STACKS)): # working directories
 
 # --- Terraform Init ---
 
+.PHONY: init
+init: $(addsuffix $(ENV)/.terraform,$(STACKS))
+
 # Reuse same terraform init for all stacks (globally locked providers and modules)
 $(addsuffix $(ENV)/.terraform,$(STACKS)): %/$(ENV)/.terraform: | .terraform %/$(ENV)/modules %/$(ENV)/_vars.auto.tf %/$(ENV)
 	$(Q)ln --relative -sf .terraform{,.lock.hcl,rc} $(@D)/
