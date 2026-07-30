@@ -12,7 +12,7 @@ SHELL := /usr/bin/env bash
 # pipe to prefix TF output with stack name
 export CLICOLOR_FORCE=1
 .SHELLFLAGS := -o pipefail -c
-P = 2>&1 | awk -v s="$*" '{ printf "[%-16s] %s\n", s, $$0; fflush() }'
+P = 2>&1 | awk -v e="$(ENV)" -v s="$*" '{ printf "[%s %-16s] %s\n", e, s, $$0; fflush() }'
 
 # Wrap in wildcard to exclude unstaged deletions
 FILES:=$(wildcard $(shell git ls-files -- '*.tf' '*.tfvars'))
