@@ -168,14 +168,16 @@ deepclean: clean
 
 # Included will be rebuild before inclusion in the same make invocation (similar to Makefile rules)
 # Also purge any now dangling symlinks from previous run.
-.deps/$(ENV).d: $(dir $(lastword $(MAKEFILE_LIST)))stacks-gen-deps.sh $(lastword $(MAKEFILE_LIST)) .deps/$(ENV).files
+.deps/$(ENV).d: $(dir $(lastword $(MAKEFILE_LIST)))stacks-gen-deps.sh $(lastword $(MAKEFILE_LIST)) $(FILES) .deps/$(ENV).files
 	$(Q)if [ -f $@ ]; then \
 	    awk -v ORS='\0' -v OFS='\0' -v ENV='$(ENV)' '/_vars\.auto\.tf:/{gsub(/\$$\(ENV\)/,ENV); sub(/.*_vars\.auto\.tf:[[:space:]]*/,""); if(NF){$$1=$$1; print}}' $@ | find -files0-from - -xtype l -delete 2>/dev/null || true; \
 	fi
-	$(Q)./$< "$(ENV)" $(words $(STACKS)) $(STACKS:%/=%) $(FILES) > $@
-	$(Q)echo 'include $@' > $(@D)/check-cycles-$(ENV).mk
+	$(Q)./$< "$(ENV)" $(words $(STACKS)) $(STACKS:%/=%) $(FILES) > $@.tmp
+	$(Q)echo 'include $@.tmp' > $(@D)/check-cycles-$(ENV).mk
 	$(Q)! $(MAKE) -f $(@D)/check-cycles-$(ENV).mk plan -n 2>&1 | grep -Fi Circular
 	$(Q)rm $(@D)/check-cycles-$(ENV).mk
+	$(Q)cmp -s $@.tmp $@ || mv $@.tmp $@
+	$(Q)rm -f $@.tmp
 
 .deps/$(ENV).files: $(sort $(dir $(FILES))) # depend on dirs to update on file deletion
 	$(Q)mkdir -p $(@D)
