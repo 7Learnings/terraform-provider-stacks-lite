@@ -84,7 +84,7 @@ $(addsuffix $(ENV)/.refresh,$(STACKS)): %/$(ENV)/.refresh: %/$(ENV)/.terraform
 SPACE:= $() $()
 
 # export stacks-lite provider config as environment variables
-ALL_TARGETS:=$(addsuffix $(ENV)/outputs.json,$(STACKS)) $(addsuffix $(ENV)/tfplan.json,$(STACKS)) $(addsuffix $(ENV)/.destroy,$(STACKS)) $(addsuffix $(ENV)/.refresh,$(STACKS))
+ALL_TARGETS:=$(addsuffix $(ENV)/outputs.json,$(STACKS)) $(addsuffix $(ENV)/tfplan.json,$(STACKS)) $(addsuffix $(ENV)/.destroy,$(STACKS)) $(addsuffix $(ENV)/.refresh,$(STACKS)) $(addsuffix $(ENV)/zzz_stacks.auto.tfvars,$(STACKS))
 # make equivalent of $(shell revpath $(@D))
 $(ALL_TARGETS): export STACKS_ROOT=$(subst $(SPACE),/,$(foreach w,$(subst /,$(SPACE),$(@D)),..))
 $(ALL_TARGETS): export STACKS_ENV=$(ENV)
