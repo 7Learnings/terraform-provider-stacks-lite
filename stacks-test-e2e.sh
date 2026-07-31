@@ -23,7 +23,9 @@ test_plan_apply_refresh_destroy_clean() {
     assert_matches "\[$ENV instances.*Plan.*0 to destroy" "$output"
     assert_matches "\[$ENV org.*Plan.*0 to destroy" "$output"
     output="$($MAKE plan)"
-    assert_empty "$output" # recreates .deps files manifest
+    if [ -n "$output" ]; then # can regenerate .deps files
+        assert_matches 'Nothing to be done for.*plan' "$output"
+    fi
     touch instances/main.tf
     output="$($MAKE plan)"
     assert_not_matches "\[$ENV network/vpc" "$output"
@@ -42,7 +44,9 @@ test_plan_apply_refresh_destroy_clean() {
     assert_matches "\[$ENV instances.*No changes" "$output"
     assert_matches "\[$ENV org.*No changes" "$output"
     output="$($MAKE plan)"
-    assert_empty "$output" # recreates .deps files manifest
+    if [ -n "$output" ]; then # can regenerate .deps files
+        assert_matches 'Nothing to be done for.*plan' "$output"
+    fi
     output="$(TF_CLI_ARGS='-auto-approve' $MAKE destroy)"
     assert_matches "\[$ENV network/vpc.*Destroy complete" "$output"
     assert_matches "\[$ENV instances.*Destroy complete" "$output"
@@ -57,7 +61,9 @@ test_targets() {
     output="$($MAKE plan-network)"
     assert_matches "\[$ENV network/vpc.*Plan.*0 to destroy" "$output"
     output="$($MAKE plan-network/vpc)"
-    assert_empty "$output" # recreates .deps files manifest
+    if [ -n "$output" ]; then # can regenerate .deps files
+        assert_matches 'Nothing to be done for.*plan-network/vpc' "$output"
+    fi
     output="$($MAKE plan-instances)"
     assert_matches "\[$ENV instances.*Plan.*0 to destroy" "$output"
 }
