@@ -3,15 +3,17 @@
 # Run full e2e tests operating on the example/ directory
 
 set_up() {
+    shopt -s globstar
     cd example
-    export ENV=dev-eu
-    export MAKE="make -f ../stacks.mk ENV=$ENV CLICOLOR_FORCE=0"
+    ENV=dev-eu
+    MAKE="make -f ../stacks.mk ENV=$ENV CLICOLOR_FORCE=0"
 }
 
 tear_down() {
     $MAKE deepclean
     rm .terraform.lock.hcl
     assert_empty "$(git status --porcelain -- .)"
+    shopt -u globstar
 }
 
 test_plan_apply_refresh_destroy_clean() {
@@ -84,6 +86,37 @@ test_plan_changed() {
 
     # cleanup
     git checkout network/vpc/main.tf
+}
+
+test_separate_plan_apply() {
+    # 1. Run an initial full plan and apply to establish the remote state
+    $MAKE plan >/dev/null 2>&1
+    $MAKE apply >/dev/null 2>&1
+
+    # 2. Make a downstream stack 'instances' newly dependent on upstream stack output
+    echo -e 'resource "stacks" "org" {\nstack = "org"\n}' >> instances/main.tf
+
+    # 3. Generate plan for changed stacks
+    rm -f **/$ENV/{outputs.json,tfplan,tfplan.json}
+    output=$($MAKE plan-changed DIFF_BASE=HEAD 2>&1)
+    assert_matches "\[$ENV instances.*Planning" "$output"
+    assert_not_matches "\[$ENV org.*Planning" "$output"
+    assert_matches 'outputs = \(known after apply\)' "$output"
+    assert_file_exists instances/$ENV/tfplan.json
+    assert_file_not_exists org/$ENV/tfplan.json
+
+    # 5. Apply only the downstream changed stack
+    rm -f **/$ENV/{outputs.json,tfplan,tfplan.json}
+    output=$($MAKE apply-changed DIFF_BASE=HEAD)
+    assert_matches "\[$ENV instances.*Apply complete" "$output"
+    assert_matches "\[$ENV org\s*\] Fetching" "$output"
+    assert_not_matches "\[$ENV org\s*\] Apply" "$output"
+    assert_file_exists instances/$ENV/outputs.json
+    assert_file_exists org/$ENV/outputs.json
+    assert_file_not_exists org/$ENV/tfplan.json
+
+    # cleanup
+    git checkout instances/main.tf
 }
 
 test_failed_apply_stale_plan() {

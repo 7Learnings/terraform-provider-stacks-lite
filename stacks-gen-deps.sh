@@ -104,7 +104,8 @@ for stack in "${STACKS[@]}"; do
         # When running plan-changed/apply-changed, only depend on upstream if it's also in CHANGED_STACKS
         # Using .SECONDEXPANSION to defer evaluation of CHANGED_STACKS because it's calculation cyclically depends on the generated dependency file itself (DOWNSTREAMS_x)
         echo "$stack/\$(ENV)/tfplan.json: \$(if \$(filter plan-changed apply-changed,\$(MAKECMDGOALS)),\$\$(if \$\$(filter $upstream,\$\$(CHANGED_STACKS)),$upstream/\$(ENV)/tfplan.json),$upstream/\$(ENV)/tfplan.json)"
-        echo "$stack/\$(ENV)/outputs.json: \$(if \$(filter plan-changed apply-changed,\$(MAKECMDGOALS)),\$\$(if \$\$(filter $upstream,\$\$(CHANGED_STACKS)),$upstream/\$(ENV)/outputs.json),$upstream/\$(ENV)/outputs.json)"
+        # Either depend on regular output or fetched remote state for apply-changed
+        echo "$stack/\$(ENV)/outputs.json: $upstream/\$(ENV)/outputs.json"
         echo "$upstream/\$(ENV)/.destroy: destroy-$stack" # destroy in reverse order
         echo "$stack/\$(ENV)/.refresh: refresh-$upstream"
         echo "DOWNSTREAMS_$upstream += $stack"

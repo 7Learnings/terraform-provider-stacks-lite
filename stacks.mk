@@ -9,6 +9,9 @@ DIFF_BASE:=@{upstream}
 
 SHELL := /usr/bin/env bash
 
+# used to break cyclic dependency between CHANGED_STACKS and deps.d
+.SECONDEXPANSION:
+
 # pipe to prefix TF output with stack name
 export CLICOLOR_FORCE=1
 .SHELLFLAGS := -o pipefail -c
@@ -57,17 +60,24 @@ $(addsuffix $(ENV)/tfplan.json,$(STACKS)): %/$(ENV)/tfplan.json: %/$(ENV)/.terra
 	fi
 
 # apply
-$(addsuffix $(ENV)/outputs.json,$(STACKS)): %/$(ENV)/outputs.json: %/$(ENV)/tfplan.json
-	$(Q)echo "Applying $*" $(P)
+# Avoid planning unchanged stacks during apply-changed by making apply → plan dependency conditional
+$(addsuffix $(ENV)/outputs.json,$(STACKS)): %/$(ENV)/outputs.json: %/$(ENV)/.terraform $(if $(filter apply-changed,$(MAKECMDGOALS)),$$(if $$(filter $$*,$$(CHANGED_STACKS)),%/$(ENV)/tfplan.json),%/$(ENV)/tfplan.json)
+# Either apply when stack has changed or read from remote state in case it is skipped
+#
 # Applying downstream stacks also (re-)reads upstream tfplan.json in the final plan validation phase.
 # https://github.com/hashicorp/terraform/blob/main/docs/resource-instance-change-lifecycle.md
 # https://github.com/opentofu/opentofu/blob/cba3902c0bf20531ee27d6c76e907fa7348b74e6/internal/engine/applying/operations_resource_managed.go#L91
 # Because of that we mark tfplans as old rather than to directly delete them, so that they will be rebuild during the next plan.
-	$(Q)cd $(@D) && \
-	    touch --no-create --time=mtime --date=@0 tfplan tfplan.json && \
-	    $(TF) apply -parallelism=$(TF_PARALLELISM) tfplan $(P) && \
-	    rm tfplan && \
-	    $(TF) output -json > $(@F)
+	$(Q)if [ -n '$(CHANGED_STACKS)' ] && [[ ! ' $(CHANGED_STACKS) ' =~ " $* " ]]; then \
+	    echo "Fetching outputs for $*" $(P); \
+	else \
+	    echo "Applying $*" $(P) && \
+	    cd $(@D) && \
+	      touch --no-create --time=mtime --date=@0 tfplan tfplan.json && \
+	      $(TF) apply -parallelism=$(TF_PARALLELISM) tfplan $(P) && \
+	      rm tfplan; \
+	fi
+	$(Q)cd $(@D) && $(TF) output -json > $(@F)
 
 # destroy
 $(addsuffix $(ENV)/.destroy,$(STACKS)): %/$(ENV)/.destroy:
@@ -168,14 +178,16 @@ deepclean: clean
 
 # Included will be rebuild before inclusion in the same make invocation (similar to Makefile rules)
 # Also purge any now dangling symlinks from previous run.
-.deps/$(ENV).d: $(dir $(lastword $(MAKEFILE_LIST)))stacks-gen-deps.sh $(lastword $(MAKEFILE_LIST)) .deps/$(ENV).files
+.deps/$(ENV).d: $(dir $(lastword $(MAKEFILE_LIST)))stacks-gen-deps.sh $(lastword $(MAKEFILE_LIST)) $(FILES) .deps/$(ENV).files
 	$(Q)if [ -f $@ ]; then \
 	    awk -v ORS='\0' -v OFS='\0' -v ENV='$(ENV)' '/_vars\.auto\.tf:/{gsub(/\$$\(ENV\)/,ENV); sub(/.*_vars\.auto\.tf:[[:space:]]*/,""); if(NF){$$1=$$1; print}}' $@ | find -files0-from - -xtype l -delete 2>/dev/null || true; \
 	fi
-	$(Q)./$< "$(ENV)" $(words $(STACKS)) $(STACKS:%/=%) $(FILES) > $@
-	$(Q)echo 'include $@' > $(@D)/check-cycles-$(ENV).mk
+	$(Q)./$< "$(ENV)" $(words $(STACKS)) $(STACKS:%/=%) $(FILES) > $@.tmp
+	$(Q)echo 'include $@.tmp' > $(@D)/check-cycles-$(ENV).mk
 	$(Q)! $(MAKE) -f $(@D)/check-cycles-$(ENV).mk plan -n 2>&1 | grep -Fi Circular
 	$(Q)rm $(@D)/check-cycles-$(ENV).mk
+	$(Q)cmp -s $@.tmp $@ || mv $@.tmp $@
+	$(Q)rm -f $@.tmp
 
 .deps/$(ENV).files: $(sort $(dir $(FILES))) # depend on dirs to update on file deletion
 	$(Q)mkdir -p $(@D)
@@ -190,9 +202,6 @@ deepclean: clean
 	$(Q)sed -En '/terraform \{/,/^\}$$/p' $^ > $@.tmp
 	$(Q)cmp -s $@.tmp $@ || mv $@.tmp $@
 	$(Q)rm -f $@.tmp
-
-# used to break cyclic dependency between CHANGED_STACKS and deps.d
-.SECONDEXPANSION:
 
 include .deps/$(ENV).d
 
