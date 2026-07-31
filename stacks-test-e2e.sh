@@ -4,8 +4,8 @@
 
 set_up() {
     cd example
-    export ENV=dev-eu
-    export MAKE="make -f ../stacks.mk ENV=$ENV CLICOLOR_FORCE=0"
+    ENV=dev-eu
+    MAKE="make -f ../stacks.mk ENV=$ENV CLICOLOR_FORCE=0"
 }
 
 tear_down() {
