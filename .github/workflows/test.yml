@@ -16,4 +16,4 @@ jobs:
       uses: nixbuild/nix-quick-install-action@2c9db80fb984ceb1bcaa77cdda3fdf8cfba92035 # v34
 
     - name: Run Tests
-      run: nix run nixpkgs#bashunit -- stacks-test-e2e.sh
+      run: nix run nixpkgs#bashunit -- . stacks-test-e2e.sh
