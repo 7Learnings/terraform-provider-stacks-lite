@@ -17,12 +17,20 @@ export CLICOLOR_FORCE=1
 .SHELLFLAGS := -o pipefail -c
 P = 2>&1 | awk -v e="$(ENV)" -v s="$*" '{ printf "[%s %-16s] %s\n", e, s, $$0; fflush() }'
 
-# Wrap in wildcard to exclude unstaged deletions
-FILES:=$(wildcard $(shell git ls-files -- '*.tf' '*.tfvars'))
-
 ifeq ($(ENV),)
   $(error 'Must set ENV variable')
 endif
+
+# Extract shard from ENV (last -delimited component, e.g. dev-eu → eu)
+SHARD := $(lastword $(subst -, ,$(ENV)))
+# Keep files with no shard suffix (main.tf) or a matching shard suffix (main.<SHARD>.tf);
+# exclude files with a different shard suffix (main.<OTHER>.tf)
+SHARD_FILTER := grep -E "(^|/)[^/.]*\.(tf|tfvars)\$$|(^|/)[^/]*\.$(SHARD)\.(tf|tfvars)\$$"
+
+# Wrap in wildcard to exclude unstaged deletions
+# Only consider files without shard suffix or with matching SHARD suffix
+FILES := $(wildcard $(shell git ls-files -- '*.tf' '*.tfvars' | $(SHARD_FILTER)))
+
 ifneq ($(MAKECMDGOALS),clean)
   UNTRACKED:=$(filter-out .deps/%.tf,$(shell git ls-files --other --exclude-standard -- '*.tf' '*.tfvars' '*.tfvars.json'))
   ifneq ($(UNTRACKED),)
@@ -208,7 +216,7 @@ include .deps/$(ENV).d
 # --- Changed Stacks Detection ---
 
 ifneq ($(filter plan-changed apply-changed changed,$(MAKECMDGOALS)),)
-_CHANGED_DIRS := $(sort $(dir $(shell git diff --relative --name-only $(DIFF_BASE) -- "*.tf" "*.tfvars" 2>/dev/null)))
+_CHANGED_DIRS := $(sort $(dir $(shell git diff --relative --name-only $(DIFF_BASE) -- "*.tf" "*.tfvars" 2>/dev/null | $(SHARD_FILTER))))
 _HAS_ROOT_CHANGE := $(filter ./,$(_CHANGED_DIRS))
 _DIRECTLY_CHANGED := $(sort $(if $(_HAS_ROOT_CHANGE),$(STACKS:%/=%),\
     $(foreach d,$(filter-out ./,$(_CHANGED_DIRS)),$(patsubst %/,%,$(filter $(d) $(d)%,$(STACKS))))))
