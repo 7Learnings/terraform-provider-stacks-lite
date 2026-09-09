@@ -77,3 +77,20 @@ test_cross_stack_dependencies() {
     assert_matches 'network/vpc/[^/]+/.destroy: destroy-instances' "$output"
     assert_matches 'instances/[^/]+/.refresh: refresh-network/vpc' "$output"
 }
+
+test_deps_hook_prereqs() {
+    # STACKS_DEPS_HOOK reports extra deps; the generator expands them to
+    # concrete tracked files and makes them prerequisites of tfplan.json
+    cd example/
+    output=$(STACKS_DEPS_HOOK=./stacks-deps-nix.sh bash ../stacks-gen-deps.sh dev-eu 2 org instances org/main.tf instances/main.tf)
+
+    # the nix stack (instances) gets its colocated nix + shared module as tfplan prereqs
+    assert_contains 'instances/$(ENV)/tfplan.json: instances/default.nix nix/common/mod.nix' "$output"
+    # a non-nix stack (org) gets no hook-derived prereqs
+    assert_not_contains 'org/$(ENV)/tfplan.json: instances/default.nix' "$output"
+    assert_not_contains 'org/$(ENV)/tfplan.json: nix/common/mod.nix' "$output"
+
+    # without the hook, no extra source deps are emitted at all
+    output=$(bash ../stacks-gen-deps.sh dev-eu 2 org instances org/main.tf instances/main.tf)
+    assert_not_contains 'Extra source deps' "$output"
+}

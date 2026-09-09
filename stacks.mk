@@ -175,6 +175,8 @@ deepclean: clean
 
 
 # --- Dynamic Dependency Logic ---
+# Make the optional STACKS_DEPS_HOOK available to stacks-gen-deps.sh
+export STACKS_DEPS_HOOK
 
 # Included will be rebuild before inclusion in the same make invocation (similar to Makefile rules)
 # Also purge any now dangling symlinks from previous run.
@@ -212,6 +214,11 @@ _CHANGED_DIRS := $(sort $(dir $(shell git diff --relative --name-only $(DIFF_BAS
 _HAS_ROOT_CHANGE := $(filter ./,$(_CHANGED_DIRS))
 _DIRECTLY_CHANGED := $(sort $(if $(_HAS_ROOT_CHANGE),$(STACKS:%/=%),\
     $(foreach d,$(filter-out ./,$(_CHANGED_DIRS)),$(patsubst %/,%,$(filter $(d) $(d)%,$(STACKS))))))
+# extra deps per stack, discovered by the optional STACKS_DEPS_HOOK
+ifneq ($(strip $(STACKS_DEPS_HOOK)),)
+_DIRECTLY_CHANGED += $(foreach s,$(STACKS),$(if $(strip $(shell _sd=$$( $(STACKS_DEPS_HOOK) $(patsubst %/,%,$(s)) ); if [ -n "$$_sd" ]; then git diff --name-only $(DIFF_BASE) -- $$_sd 2>/dev/null; fi)),$(patsubst %/,%,$(s)),))
+endif
+_DIRECTLY_CHANGED := $(sort $(_DIRECTLY_CHANGED))
 # Expand downstreams transitively (3 iterations)
 _CS1 := $(sort $(_DIRECTLY_CHANGED) $(foreach s,$(_DIRECTLY_CHANGED),$(DOWNSTREAMS_$(s))))
 _CS2 := $(sort $(_CS1) $(foreach s,$(_CS1),$(DOWNSTREAMS_$(s))))
