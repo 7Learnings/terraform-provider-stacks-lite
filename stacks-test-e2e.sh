@@ -11,7 +11,7 @@ set_up() {
 
 tear_down() {
     $MAKE deepclean
-    rm .terraform.lock.hcl
+    rm -f .terraform.lock.hcl
     assert_empty "$(git status --porcelain -- .)"
     shopt -u globstar
 }
@@ -149,4 +149,60 @@ test_file_deletion() {
     git rm -f network/vpc/dummy.tf
     output=$($MAKE plan-network/vpc)
     assert_matches "\[$ENV network/vpc.*Plan.*0 to destroy" "$output"
+}
+
+test_deps_hook_contributes_changed() {
+    # `instances` colocates a *.nix file (instances/default.nix). The
+    # STACKS_DEPS_HOOK (./stacks-deps.sh) reports its extra deps:
+    # instances/default.nix plus the shared module in nix/common/. stacks.mk
+    # considerers the instances stack _changed_ when any of those changes.
+    HOOK="STACKS_DEPS_HOOK=./stacks-deps-nix.sh"
+
+    # 1) a colocated *.nix change re-plans its own stack only
+    echo '# change' >> instances/default.nix
+    output=$($MAKE changed DIFF_BASE=HEAD $HOOK)
+    assert_same 'instances' "$output"
+    git checkout -- instances/default.nix
+
+    # 2) a change to a shared nix module re-plans the nix stack that depends on it
+    echo '# change' >> nix/common/mod.nix
+    output=$($MAKE changed DIFF_BASE=HEAD $HOOK)
+    assert_same 'instances' "$output"
+    git checkout -- nix/common/mod.nix
+
+    # 3) without the hook, the same non-.tf changes are NOT detected
+    echo '# change' >> instances/default.nix
+    echo '# change' >> nix/common/mod.nix
+    output=$($MAKE changed DIFF_BASE=HEAD)
+    assert_same '(no changed stacks detected)' "$output"
+
+    # cleanup
+    git checkout -- instances/default.nix nix/common/mod.nix
+}
+
+test_deps_hook_direct_plan_on_file_change() {
+    # `instances` colocates a *.nix file (instances/default.nix);
+    # stacks-gen-deps.sh expands the STACKS_DEPS_HOOK deps into prerequisites
+    # of instances/$(ENV)/tfplan.json make target, so a direct plan re-plans
+    # `instances` only when a nix source changes.
+    HOOK="STACKS_DEPS_HOOK=./stacks-deps-nix.sh"
+
+    # 1) initial plan establishes the tfplan stamp
+    $MAKE plan-instances $HOOK >/dev/null 2>&1
+    # 2) unchanged nix -> up to date
+    output="$($MAKE plan-instances $HOOK)"
+    if [ -n "$output" ]; then # can regenerate .deps files
+        assert_matches 'Nothing to be done for.*plan-instances' "$output"
+    fi
+    # 3) a colocated *.nix change re-plans its own stack
+    echo '# change' >> instances/default.nix
+    output="$($MAKE plan-instances $HOOK)"
+    assert_matches "\[$ENV instances.*Plan" "$output"
+    # 4) a change to a shared nix module also re-plans the nix stack
+    echo '# change' >> nix/common/mod.nix
+    output="$($MAKE plan-instances $HOOK)"
+    assert_matches "\[$ENV instances.*Plan" "$output"
+
+    # cleanup
+    git checkout -- instances/default.nix nix/common/mod.nix
 }

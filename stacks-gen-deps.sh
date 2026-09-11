@@ -112,6 +112,21 @@ for stack in "${STACKS[@]}"; do
         echo "UPSTREAMS_$stack += $upstream"
     done
 
+    # Extra dependencies, discovered by the optional STACKS_DEPS_HOOK.
+    if [[ -n "${STACKS_DEPS_HOOK:-}" ]]; then
+        hook_specs=()
+        mapfile -t hook_specs < <( $STACKS_DEPS_HOOK "$stack" 2>/dev/null )
+        if (( ${#hook_specs[@]} > 0 )); then
+            hook_files=()
+            mapfile -t hook_files < <(git ls-files -- "${hook_specs[@]}" |
+                while IFS= read -r p; do if [[ -f $p ]]; then printf '%s\n' "$p"; fi; done)
+            if (( ${#hook_files[@]} > 0 )); then
+                echo '# Extra source deps (STACKS_DEPS_HOOK)'
+                echo "$stack/\$(ENV)/tfplan.json: ${hook_files[*]}"
+            fi
+        fi
+    fi
+
     # Filter .tfvars with exact ENV matching logic
     for f in "${FILES[@]}"; do
         if [[ $f =~ $pattern\.tfvars$ ]]; then

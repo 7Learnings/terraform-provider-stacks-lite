@@ -246,12 +246,40 @@ The entire workflow is orchestrated by a `Makefile` that automates all the steps
     4.  **Command Execution:** It runs the `tofu` command (e.g., `tofu plan`) inside this isolated workspaces (also concurrently with `make -j`).
     6.  **Change Detection:** It only plans stacks that have changes and their dependent/downstream stacks (by comparing changes against the remote-tracking branch and using make's native mtime support).
 
+### 5.1 Change Detection for additional dependencies
+
+A stack always re-plans when its `.tf`/`.tfvars` files change. Some stacks could be also driven by additional dependencies, such as `*.nix` files.
+
+stacks.mk has **no built-in knowledge** of such sources. Instead you provide a *hook*, that stacks.mk invokes **once per stack** to list that stack's extra dependencies.
+
+```make
+STACKS_DEPS_HOOK := ./stacks-deps.sh
+include stacks-lite/stacks.mk
+```
+
+For each stack (passed as its path relative to the Makefile's directory) the hook runs as `./stacks-deps.sh <stack>` and prints that stack's extra dependency files/directories as **CWD-relative git pathspecs, one per line**, or **nothing** for a stack that has no extra dependencies.
+
+stacks.mk uses this pathspecs for both its change detection mechanisms. It makes them **prerequisites of the stack's `tfplan.json`**, so a direct `plan-<stack>` re-plans the stack whenever any of them changes. They also feed the `DIFF_BASE`-git-based change detection.
+
+**Example: Nix.** A Nix-driven stack colocates its `*.nix` sources and also depends on shared Nix modules and the flake:
+
+```sh
+#!/usr/bin/env bash
+# stacks-deps.sh <stack> — print a stack's extra (non-.tf) deps, one per line.
+set -euo pipefail
+stack="$1"
+shared=(nix/common/ ../flake.nix ../flake.lock)   # every nix stack depends on these
+mapfile -t colocated < <(git ls-files -- "${stack}/*.nix")
+(( ${#colocated[@]} > 0 )) || exit 0              # no colocated nix -> no extra deps
+printf '%s\n' "${colocated[@]}" "${shared[@]}"
+```
+
 ## 6. Usage examples
 
 ```sh
-  make plan-changed                      # diff vs @{upstream}
+  make plan-changed                        # diff vs @{upstream}
   make plan-changed DIFF_BASE=origin/main  # diff vs specific branch
   make plan-changed DIFF_BASE=HEAD~3       # diff vs 3 commits ago
   make changed DIFF_BASE=HEAD              # just list affected stacks
-  make plan                              # unchanged — plans everything with full deps
+  make plan                                # unchanged — plans everything with full deps
 ```
