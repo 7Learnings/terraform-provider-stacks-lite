@@ -141,6 +141,7 @@ $(addsuffix $(ENV)/modules,$(STACKS)): %/$(ENV)/modules: modules | %/$(ENV)
 	$(Q)rm -rf init/$(ENV)
 
 $(addsuffix $(ENV)/zzz_stacks.auto.tfvars,$(STACKS)): %/$(ENV)/zzz_stacks.auto.tfvars:
+	$(Q)mkdir -p $(@D)
 	$(Q){\
 		echo "# auto-generated stacks variables for $*/$(ENV)"; \
 		echo 'stacks_root = "$(STACKS_ROOT)"'; \
@@ -149,6 +150,7 @@ $(addsuffix $(ENV)/zzz_stacks.auto.tfvars,$(STACKS)): %/$(ENV)/zzz_stacks.auto.t
 	} > $@
 
 $(addsuffix $(ENV)/_vars.auto.tf,$(STACKS)): %/$(ENV)/_vars.auto.tf: .deps/$(ENV).d # depend on deps file to rebuild on file changes and deletion
+	$(Q)mkdir -p $(@D)
 	$(Q){\
 		echo "# auto-generated variable declarations for $*/$(ENV)"; \
 		sed -nE 's|^\s*([a-zA-Z0-9_-]+)\s*=.*$$|variable "\1" {}|p' $(filter %.tfvars,$^) | sort -u; \
@@ -194,11 +196,13 @@ deepclean: clean
 	$(Q)echo '$(FILES)' | cmp -s - $@ || echo '$(FILES)' > $@
 
 .deps/$(ENV).modules.tf: $(filter %.tf,$(FILES))
+	$(Q)mkdir -p $(@D)
 	$(Q)awk -f $(dir $(filter %/stacks.mk,$(MAKEFILE_LIST)))stacks-extract-modules.awk $^ > $@.tmp
 	$(Q)cmp -s $@.tmp $@ || mv $@.tmp $@
 	$(Q)rm -f $@.tmp
 
 .deps/$(ENV).tf.tf: $(filter %.tf,$(FILES))
+	$(Q)mkdir -p $(@D)
 	$(Q)sed -En '/terraform \{/,/^\}$$/p' $^ > $@.tmp
 	$(Q)cmp -s $@.tmp $@ || mv $@.tmp $@
 	$(Q)rm -f $@.tmp
