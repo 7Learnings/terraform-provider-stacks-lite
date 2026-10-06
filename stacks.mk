@@ -140,7 +140,7 @@ $(addsuffix $(ENV)/modules,$(STACKS)): %/$(ENV)/modules: modules | %/$(ENV)
 	$(Q)rm -rf .terraform{,.lock.hcl} && mv init/$(ENV)/.terraform{,.lock.hcl} .
 	$(Q)rm -rf init/$(ENV)
 
-$(addsuffix $(ENV)/zzz_stacks.auto.tfvars,$(STACKS)): %/$(ENV)/zzz_stacks.auto.tfvars:
+$(addsuffix $(ENV)/zzz_stacks.auto.tfvars,$(STACKS)): %/$(ENV)/zzz_stacks.auto.tfvars: | %/$(ENV)
 	$(Q){\
 		echo "# auto-generated stacks variables for $*/$(ENV)"; \
 		echo 'stacks_root = "$(STACKS_ROOT)"'; \
@@ -148,7 +148,7 @@ $(addsuffix $(ENV)/zzz_stacks.auto.tfvars,$(STACKS)): %/$(ENV)/zzz_stacks.auto.t
 		echo 'stack = "$*"'; \
 	} > $@
 
-$(addsuffix $(ENV)/_vars.auto.tf,$(STACKS)): %/$(ENV)/_vars.auto.tf: .deps/$(ENV).d # depend on deps file to rebuild on file changes and deletion
+$(addsuffix $(ENV)/_vars.auto.tf,$(STACKS)): %/$(ENV)/_vars.auto.tf: .deps/$(ENV).d | %/$(ENV) # depend on deps file to rebuild on file changes and deletion
 	$(Q){\
 		echo "# auto-generated variable declarations for $*/$(ENV)"; \
 		sed -nE 's|^\s*([a-zA-Z0-9_-]+)\s*=.*$$|variable "\1" {}|p' $(filter %.tfvars,$^) | sort -u; \
