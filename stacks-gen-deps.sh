@@ -6,17 +6,6 @@ NSTACKS=$2
 STACKS=("${@:3:$NSTACKS}")
 FILES=("${@:3+NSTACKS}")
 
-# Validate stack names: each path component must start with a letter.
-for stack in "${STACKS[@]}"; do
-    IFS='/' read -ra parts <<< "$stack"
-    for part in "${parts[@]}"; do
-        if ! [[ "$part" =~ ^[a-zA-Z] ]]; then
-            echo "Error: Invalid stack path: '$stack'. Component '$part' must start with a letter." >&2
-            exit 1
-        fi
-    done
-done
-
 # regex matching any file in dir or any of it's parents (whole branch)
 along_branch_re() {
     local dir=$1
@@ -124,9 +113,12 @@ for stack in "${STACKS[@]}"; do
                 else
                     dir=''
                 fi
-                # e.g. network_2-eu-.auto.tfvars to ensure lexical ordering
+                # e.g. _network_2-eu-.auto.tfvars to ensure lexical ordering.
+                # The leading '_' sort key on non-root files guarantees they sort after
+                # every root prec prefix (digits 0-9) and before zzz_stacks (z), so a
+                # deeper file always wins even when the dir name starts with a digit.
                 # https://opentofu.org/docs/language/values/variables/#variable-definition-precedence
-                deps["$f"]="${dir//\//_}${dir:+_}$prec-${base}-.auto.tfvars"
+                deps["$f"]="${dir:+_}${dir//\//_}${dir:+_}$prec-${base}-.auto.tfvars"
             fi
         fi
     done
