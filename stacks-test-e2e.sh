@@ -6,12 +6,12 @@ set_up() {
     shopt -s globstar
     cd example
     ENV=dev-eu
-    MAKE="make -f ../stacks.mk ENV=$ENV CLICOLOR_FORCE=0"
+    MAKE="make ENV=$ENV CLICOLOR_FORCE=0" # example/Makefile includes ../stacks.mk
 }
 
 tear_down() {
     $MAKE deepclean
-    rm .terraform.lock.hcl
+    rm -f .terraform.lock.hcl
     assert_empty "$(git status --porcelain -- .)"
     shopt -u globstar
 }
@@ -149,4 +149,82 @@ test_file_deletion() {
     git rm -f network/vpc/dummy.tf
     output=$($MAKE plan-network/vpc)
     assert_matches "\[$ENV network/vpc.*Plan.*0 to destroy" "$output"
+}
+
+test_extra_deps_plan() {
+    # example/Makefile sets EXTRA_DEPS_<stack> for instances and org to their
+    # own config.json plus the shared common/*.json; network/vpc has none.
+    $MAKE plan >/dev/null 2>&1
+    output="$($MAKE plan)"
+    if [ -n "$output" ]; then # can regenerate .deps files
+        assert_matches 'Nothing to be done for.*plan' "$output"
+    fi
+
+    # 1) a shared JSON change re-plans all stacks depending on it, only those
+    touch common/tags.json
+    output="$($MAKE plan)"
+    assert_matches "\[$ENV instances.*Planning" "$output"
+    assert_matches "\[$ENV org.*Planning" "$output"
+    assert_not_matches "\[$ENV network/vpc" "$output"
+
+    # 2) a stack specific JSON change re-plans its stack only
+    touch instances/config.json
+    output="$($MAKE plan)"
+    assert_matches "\[$ENV instances.*Planning" "$output"
+    assert_not_matches "\[$ENV org" "$output"
+    assert_not_matches "\[$ENV network/vpc" "$output"
+
+    # 3) a new shared JSON file is picked up without any .tf change
+    echo '{}' > common/new.json
+    output="$($MAKE plan-instances)"
+    assert_matches "\[$ENV instances.*Planning" "$output"
+
+    # 4) stacks.mk alone (no EXTRA_DEPS) plans as before and ignores JSON changes
+    touch common/tags.json instances/config.json org/config.json
+    output="$(make -f ../stacks.mk ENV=$ENV CLICOLOR_FORCE=0 plan)"
+    assert_not_matches 'Planning' "$output"
+    touch org/main.tf
+    output="$(make -f ../stacks.mk ENV=$ENV CLICOLOR_FORCE=0 plan)"
+    assert_matches "\[$ENV org.*Planning" "$output"
+    assert_not_matches "\[$ENV instances" "$output"
+
+    # cleanup
+    rm common/new.json
+}
+
+test_extra_deps_changed() {
+    # Run an initial full plan and apply to have a clean state
+    $MAKE plan >/dev/null 2>&1
+    $MAKE apply >/dev/null 2>&1
+
+    # 1) a stack specific JSON change marks only its stack directly changed (not skipped),
+    #    not other stacks with extra deps
+    sed -i 's/small/large/' instances/config.json
+    output=$($MAKE changed DIFF_BASE=HEAD)
+    assert_same 'instances' "$output"
+    output=$($MAKE plan-changed DIFF_BASE=HEAD)
+    assert_matches "\[$ENV instances.*Plan:.*to change" "$output"
+    assert_not_matches 'Skip.*instances' "$output"
+    assert_not_matches "\[$ENV org" "$output"
+    git checkout -- instances/config.json
+
+    sed -i 's/standard/premium/' org/config.json
+    output=$($MAKE changed DIFF_BASE=HEAD)
+    assert_same 'org' "$output"
+    git checkout -- org/config.json
+
+    # 2) a shared JSON change marks all stacks depending on it changed, only those
+    sed -i 's/platform/infra/' common/tags.json
+    output=$($MAKE changed DIFF_BASE=HEAD)
+    assert_same 'instances org' "$output"
+
+    # 3) stacks.mk alone (no EXTRA_DEPS) does not detect JSON changes, but still .tf changes
+    output=$(make -f ../stacks.mk ENV=$ENV changed DIFF_BASE=HEAD)
+    assert_same '(no changed stacks detected)' "$output"
+    echo '# change' >> org/main.tf
+    output=$(make -f ../stacks.mk ENV=$ENV changed DIFF_BASE=HEAD)
+    assert_same 'org' "$output"
+
+    # cleanup
+    git checkout -- common/tags.json org/main.tf
 }

@@ -38,7 +38,7 @@ STACKS := $(shell printf '%s\n' $(sort $(filter-out ./ modules/%,$(dir $(FILES))
 # --- Rules ---
 
 # plan
-$(addsuffix $(ENV)/tfplan.json,$(STACKS)): %/$(ENV)/tfplan.json: %/$(ENV)/.terraform %/$(ENV)/modules
+$(addsuffix $(ENV)/tfplan.json,$(STACKS)): %/$(ENV)/tfplan.json: %/$(ENV)/.terraform %/$(ENV)/modules $$(EXTRA_DEPS_$$*)
 	$(Q)skip=false; \
 	if [ -n "$(filter plan-changed apply-changed,$(MAKECMDGOALS))" ] && \
 	   [ -z "$(filter $*,$(_DIRECTLY_CHANGED))" ] && [ -f "$@" ]; then \
@@ -210,8 +210,11 @@ include .deps/$(ENV).d
 ifneq ($(filter plan-changed apply-changed changed,$(MAKECMDGOALS)),)
 _CHANGED_DIRS := $(sort $(dir $(shell git diff --relative --name-only $(DIFF_BASE) -- "*.tf" "*.tfvars" 2>/dev/null)))
 _HAS_ROOT_CHANGE := $(filter ./,$(_CHANGED_DIRS))
+_EXTRA_DEPS := $(sort $(foreach s,$(STACKS:%/=%),$(EXTRA_DEPS_$(s))))
+_EXTRA_CHANGED := $(if $(_EXTRA_DEPS),$(shell git diff --relative --name-only $(DIFF_BASE) -- $(_EXTRA_DEPS) 2>/dev/null))
 _DIRECTLY_CHANGED := $(sort $(if $(_HAS_ROOT_CHANGE),$(STACKS:%/=%),\
-    $(foreach d,$(filter-out ./,$(_CHANGED_DIRS)),$(patsubst %/,%,$(filter $(d) $(d)%,$(STACKS))))))
+    $(foreach d,$(filter-out ./,$(_CHANGED_DIRS)),$(patsubst %/,%,$(filter $(d) $(d)%,$(STACKS))))) \
+    $(foreach s,$(STACKS:%/=%),$(if $(filter $(EXTRA_DEPS_$(s)),$(_EXTRA_CHANGED)),$(s))))
 # Expand downstreams transitively (3 iterations)
 _CS1 := $(sort $(_DIRECTLY_CHANGED) $(foreach s,$(_DIRECTLY_CHANGED),$(DOWNSTREAMS_$(s))))
 _CS2 := $(sort $(_CS1) $(foreach s,$(_CS1),$(DOWNSTREAMS_$(s))))
