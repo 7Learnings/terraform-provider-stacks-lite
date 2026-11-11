@@ -49,6 +49,7 @@ stacks/
 │       ├── prod-eu.tfvars              # Override for prod-eu env.
 │       ├── main.tf
 │       └── subnets.tf
+├── common/                             # Shared files read by stacks (e.g. JSON, Nix), declared via `EXTRA_DEPS_<stack>` (see 5.1).
 └── modules/                            # Local TF modules (use `./modules/path` as source in stacks)
 ```
 
@@ -246,12 +247,39 @@ The entire workflow is orchestrated by a `Makefile` that automates all the steps
     4.  **Command Execution:** It runs the `tofu` command (e.g., `tofu plan`) inside this isolated workspaces (also concurrently with `make -j`).
     6.  **Change Detection:** It only plans stacks that have changes and their dependent/downstream stacks (by comparing changes against the remote-tracking branch and using make's native mtime support).
 
+### 5.1 Depending on other files
+
+A stack always re-plans when its `.tf`/`.tfvars` files change. Stacks can also depend on other files, e.g. JSON read via `file()`/`jsondecode()` or Nix code generating inputs. stacks.mk has no built-in knowledge of those, so you declare them per stack in your `Makefile`, **before** including stacks.mk:
+
+```make
+EXTRA_DEPS_<stack> := <file>...
+```
+
+`<stack>` is the stack path (e.g. `network/vpc`) and the files are paths relative to the `Makefile`. stacks.mk uses them for both change detection mechanisms:
+
+* They are **prerequisites of the stack's plan**, so `make plan`/`plan-<stack>` re-plans the stack whenever one of them changes (mtime).
+* They feed the **`DIFF_BASE` git-based detection**, so `changed`/`plan-changed`/`apply-changed` treat the stack (and its downstream stacks) as changed.
+
+The variables are evaluated on every make invocation, so newly added files are picked up immediately. List only existing files (e.g. via `$(wildcard …)`), a missing prerequisite aborts make.
+
+**Example: JSON files** (see [`example/Makefile`](example/Makefile)). Each stack with its own `*.json` files also depends on the shared JSON in `common/`:
+
+```make
+JSON_COMMON := $(wildcard common/*.json)
+JSON_STACKS := $(filter-out . common,$(patsubst %/,%,$(sort $(dir $(shell git ls-files -- '*.json')))))
+$(foreach s,$(JSON_STACKS),$(eval EXTRA_DEPS_$(s) := $(wildcard $(s)/*.json) $(JSON_COMMON)))
+
+include stacks-lite/stacks.mk
+```
+
+Here `instances` and `org` each read their own `config.json` plus the shared `common/tags.json`. A change to `instances/config.json` only affects `instances`, a change to `common/tags.json` affects both, and `network/vpc` (no JSON) is unaffected by either.
+
 ## 6. Usage examples
 
 ```sh
-  make plan-changed                      # diff vs @{upstream}
+  make plan-changed                        # diff vs @{upstream}
   make plan-changed DIFF_BASE=origin/main  # diff vs specific branch
   make plan-changed DIFF_BASE=HEAD~3       # diff vs 3 commits ago
   make changed DIFF_BASE=HEAD              # just list affected stacks
-  make plan                              # unchanged — plans everything with full deps
+  make plan                                # unchanged — plans everything with full deps
 ```

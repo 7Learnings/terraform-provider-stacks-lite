@@ -131,3 +131,52 @@ test_cross_stack_dependencies() {
     assert_matches 'network/vpc/[^/]+/.destroy: destroy-instances' "$output"
     assert_matches 'instances/[^/]+/.refresh: refresh-network/vpc' "$output"
 }
+
+test_extra_deps_path_normalization() {
+    cd example/
+    local output original original_readme
+    # Preserve existing edits. Unregister cleanup when it runs so it cannot leak into the runner.
+    original=$(< common/tags.json)
+    original_readme=$(< ../README.md)
+    trap 'trap - RETURN; rm -f common/tags.json; printf "%s\n" "$original" > common/tags.json; printf "%s\n" "$original_readme" > ../README.md' RETURN
+
+    # Use stacks.mk directly so example/Makefile adds no implicit extra dependencies.
+    # Skip dependency-file generation: these assertions only exercise Git-based detection.
+    local -a make_cmd=(make --no-print-directory -f ../stacks.mk
+        -o .deps/dev.d ENV=dev DIFF_BASE=HEAD changed)
+
+    # 1) A declared dependency alone must not mark any stacks changed.
+    output=$("${make_cmd[@]}" EXTRA_DEPS=../example/common/./tags.json)
+    assert_same '(no changed stacks detected)' "$output"
+
+    # 2) A changed root dependency selects every stack, with or without redundant ./ and ../.
+    echo '{"changed":true}' > common/tags.json
+    output=$("${make_cmd[@]}" EXTRA_DEPS=common/tags.json)
+    assert_same 'instances network/vpc org' "$output"
+    output=$("${make_cmd[@]}" EXTRA_DEPS=../example/common/./tags.json)
+    assert_same 'instances network/vpc org' "$output"
+
+    # 3) Per-stack dependencies select only their owner, for relative and absolute paths.
+    output=$("${make_cmd[@]}" EXTRA_DEPS_instances=../example/common/./tags.json)
+    assert_same 'instances' "$output"
+    output=$("${make_cmd[@]}" "EXTRA_DEPS_org=$PWD/common/../common/tags.json")
+    assert_same 'org' "$output"
+
+    # 4) Replace the tracked file with a symlink. Git reports common/tags.json as changed,
+    #    so matching must preserve that name rather than resolve it to org/config.json.
+    #    Check both per-stack and root declarations.
+    rm common/tags.json
+    ln -s ../org/config.json common/tags.json
+    output=$("${make_cmd[@]}" EXTRA_DEPS_instances=./common/tags.json)
+    assert_same 'instances' "$output"
+    output=$("${make_cmd[@]}" EXTRA_DEPS=./common/tags.json)
+    assert_same 'instances network/vpc org' "$output"
+
+    # 5) A dependency genuinely outside example/ must also be detected.
+    #    ../README.md lives one level up; unlike ../example/..., it does not point back inside.
+    printf '\nExtra dependency regression input.\n' >> ../README.md
+    output=$("${make_cmd[@]}" EXTRA_DEPS=../README.md)
+    assert_same 'instances network/vpc org' "$output"
+    output=$("${make_cmd[@]}" EXTRA_DEPS_instances=../README.md)
+    assert_same 'instances' "$output"
+}
