@@ -125,7 +125,7 @@ The automation tooling would process these files in the following order (from lo
 
 Variables in files loaded later override those from files loaded earlier. All of them take precedence over environment variables (discouraging impure ad-hoc builds).
 
-Note: This is implemented by prefixing files with their path and their reverse index of the tag match, e.g. `dev-eu.tfvars` is symlinked to `_3-dev-eu.auto.tfvars`, while `network/eu.tfvars` would be symlinked to `network_2-eu.auto.tfvars`.
+Note: This is implemented by prefixing files with their path and the index of the tag match, e.g. `dev-eu.tfvars` is symlinked to `2-dev-eu-.auto.tfvars`, while `network/eu.tfvars` would be symlinked to `_network_1-eu-.auto.tfvars`. The leading `_` on non-root files guarantees they sort after every root file (whose prefix is a digit) and before `zzz_stacks.auto.tfvars`, so a deeper file always wins — even when the directory name starts with a digit.
 
 #### The "Escape Hatch": Conditional Resources
 

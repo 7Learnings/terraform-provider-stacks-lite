@@ -54,9 +54,63 @@ test_tfvars_precedence() {
     assert_contains '/0-all-.auto.tfvars: all.tfvars' "$output"
     assert_contains '/2-dev-.auto.tfvars: dev.tfvars' "$output"
     assert_contains '/2-dev-eu-.auto.tfvars: dev-eu.tfvars' "$output"
-    assert_contains '/network_0-all-.auto.tfvars: network/all.tfvars' "$output"
-    assert_contains '/network_1-eu-.auto.tfvars: network/eu.tfvars' "$output"
-    assert_contains '/network_2-dev-eu-.auto.tfvars: network/dev-eu.tfvars' "$output"
+    assert_contains '/_network_0-all-.auto.tfvars: network/all.tfvars' "$output"
+    assert_contains '/_network_1-eu-.auto.tfvars: network/eu.tfvars' "$output"
+    assert_contains '/_network_2-dev-eu-.auto.tfvars: network/dev-eu.tfvars' "$output"
+}
+
+test_tfvars_precedence_ordering() {
+    # Digit-starting, multi-layer stack: 1_network/eu.tfvars and 1_network/vpc/eu.tfvars.
+    # Covers both the digit-starting regression (leading '_' sort key) and the
+    # multi-layer ordering (a deeper path sorts after its parent, so it wins).
+    cd example/
+    output=$(bash ../stacks-gen-deps.sh dev-eu 1 1_network/vpc 1_network/vpc/main.tf all.tfvars dev-eu.tfvars dev.tfvars 1_network/all.tfvars 1_network/dev-eu.tfvars 1_network/eu.tfvars 1_network/vpc/eu.tfvars)
+
+    # root files keep their digit prec prefix (unchanged)
+    assert_contains '/0-all-.auto.tfvars: all.tfvars' "$output"
+    assert_contains '/2-dev-.auto.tfvars: dev.tfvars' "$output"
+    # non-root (digit-starting dir) files get the leading '_' sort key
+    assert_contains '/_1_network_1-eu-.auto.tfvars: 1_network/eu.tfvars' "$output"
+    assert_contains '/_1_network_vpc_1-eu-.auto.tfvars: 1_network/vpc/eu.tfvars' "$output"
+
+    # Deeper (1_network/vpc) sorts after shallower (1_network) -> deeper wins.
+    local order
+    order=$(printf '%s\n' '_1_network_1-eu-.auto.tfvars' '_1_network_vpc_1-eu-.auto.tfvars' | LC_ALL=C sort)
+    assert_same "$(echo "$order" | head -n1)" '_1_network_1-eu-.auto.tfvars'
+    assert_same "$(echo "$order" | tail -n1)" '_1_network_vpc_1-eu-.auto.tfvars'
+}
+
+test_tfvars_precedence_tofu() {
+    # End-to-end: digit-starting, multi-layer (root < 1_network < 1_network/vpc) all
+    # define 'winner'. The deepest layer must win, and zzz_stacks (created by stacks.mk)
+    # must sort last of all.
+    cd example/
+    local tmp output names n plan
+    tmp=$(mktemp -d)
+    trap 'rm -rf "$tmp"' RETURN
+
+    cat > "$tmp/main.tf" <<'EOF'
+terraform {
+  backend "local" {}
+}
+variable "winner" { type = string }
+output "winner" { value = var.winner }
+EOF
+
+    output=$(bash ../stacks-gen-deps.sh dev-eu 1 1_network/vpc 1_network/vpc/main.tf eu.tfvars 1_network/eu.tfvars 1_network/vpc/eu.tfvars)
+    names=$(echo "$output" | grep -E '\.auto\.tfvars: ' | sed -E 's|^.*/([^/]+\.auto\.tfvars):.*$|\1|')
+    while IFS= read -r n; do
+        [ -n "$n" ] && echo "winner = \"$n\"" > "$tmp/$n"
+    done <<< "$names"
+
+    # Scenario A: without zzz_stacks, the deepest (_-prefixed) file must win over root
+    plan=$(cd "$tmp" && tofu init -input=false -no-color >/dev/null 2>&1 && tofu plan -input=false -no-color 2>&1)
+    assert_matches 'winner = "_1_network_vpc_[^"]*"' "$plan"
+
+    # Scenario B: zzz_stacks (created by stacks.mk) must sort LAST and win
+    echo 'winner = "zzz_stacks"' > "$tmp/zzz_stacks.auto.tfvars"
+    plan=$(cd "$tmp" && tofu plan -input=false -no-color 2>&1)
+    assert_matches 'winner = "zzz_stacks"' "$plan"
 }
 
 
