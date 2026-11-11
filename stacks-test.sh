@@ -54,9 +54,63 @@ test_tfvars_precedence() {
     assert_contains '/0-all-.auto.tfvars: all.tfvars' "$output"
     assert_contains '/2-dev-.auto.tfvars: dev.tfvars' "$output"
     assert_contains '/2-dev-eu-.auto.tfvars: dev-eu.tfvars' "$output"
-    assert_contains '/network_0-all-.auto.tfvars: network/all.tfvars' "$output"
-    assert_contains '/network_1-eu-.auto.tfvars: network/eu.tfvars' "$output"
-    assert_contains '/network_2-dev-eu-.auto.tfvars: network/dev-eu.tfvars' "$output"
+    assert_contains '/_network_0-all-.auto.tfvars: network/all.tfvars' "$output"
+    assert_contains '/_network_1-eu-.auto.tfvars: network/eu.tfvars' "$output"
+    assert_contains '/_network_2-dev-eu-.auto.tfvars: network/dev-eu.tfvars' "$output"
+}
+
+test_tfvars_precedence_ordering() {
+    # Digit-starting, multi-layer stack: 1_network/eu.tfvars and 1_network/vpc/eu.tfvars.
+    # Covers both the digit-starting regression (leading '_' sort key) and the
+    # multi-layer ordering (a deeper path sorts after its parent, so it wins).
+    cd example/
+    output=$(bash ../stacks-gen-deps.sh dev-eu 1 1_network/vpc 1_network/vpc/main.tf all.tfvars dev-eu.tfvars dev.tfvars 1_network/all.tfvars 1_network/dev-eu.tfvars 1_network/eu.tfvars 1_network/vpc/eu.tfvars)
+
+    # root files keep their digit prec prefix (unchanged)
+    assert_contains '/0-all-.auto.tfvars: all.tfvars' "$output"
+    assert_contains '/2-dev-.auto.tfvars: dev.tfvars' "$output"
+    # non-root (digit-starting dir) files get the leading '_' sort key
+    assert_contains '/_1_network_1-eu-.auto.tfvars: 1_network/eu.tfvars' "$output"
+    assert_contains '/_1_network_vpc_1-eu-.auto.tfvars: 1_network/vpc/eu.tfvars' "$output"
+
+    # Deeper (1_network/vpc) sorts after shallower (1_network) -> deeper wins.
+    local order
+    order=$(printf '%s\n' '_1_network_1-eu-.auto.tfvars' '_1_network_vpc_1-eu-.auto.tfvars' | LC_ALL=C sort)
+    assert_same "$(echo "$order" | head -n1)" '_1_network_1-eu-.auto.tfvars'
+    assert_same "$(echo "$order" | tail -n1)" '_1_network_vpc_1-eu-.auto.tfvars'
+}
+
+test_tfvars_precedence_tofu() {
+    # End-to-end: digit-starting, multi-layer (root < 1_network < 1_network/vpc) all
+    # define 'winner'. The deepest layer must win, and zzz_stacks (created by stacks.mk)
+    # must sort last of all.
+    cd example/
+    local tmp output names n plan
+    tmp=$(mktemp -d)
+    trap 'rm -rf "$tmp"' RETURN
+
+    cat > "$tmp/main.tf" <<'EOF'
+terraform {
+  backend "local" {}
+}
+variable "winner" { type = string }
+output "winner" { value = var.winner }
+EOF
+
+    output=$(bash ../stacks-gen-deps.sh dev-eu 1 1_network/vpc 1_network/vpc/main.tf eu.tfvars 1_network/eu.tfvars 1_network/vpc/eu.tfvars)
+    names=$(echo "$output" | grep -E '\.auto\.tfvars: ' | sed -E 's|^.*/([^/]+\.auto\.tfvars):.*$|\1|')
+    while IFS= read -r n; do
+        [ -n "$n" ] && echo "winner = \"$n\"" > "$tmp/$n"
+    done <<< "$names"
+
+    # Scenario A: without zzz_stacks, the deepest (_-prefixed) file must win over root
+    plan=$(cd "$tmp" && tofu init -input=false -no-color >/dev/null 2>&1 && tofu plan -input=false -no-color 2>&1)
+    assert_matches 'winner = "_1_network_vpc_[^"]*"' "$plan"
+
+    # Scenario B: zzz_stacks (created by stacks.mk) must sort LAST and win
+    echo 'winner = "zzz_stacks"' > "$tmp/zzz_stacks.auto.tfvars"
+    plan=$(cd "$tmp" && tofu plan -input=false -no-color 2>&1)
+    assert_matches 'winner = "zzz_stacks"' "$plan"
 }
 
 
@@ -76,4 +130,53 @@ test_cross_stack_dependencies() {
     # Check for destroy and refresh dependencies
     assert_matches 'network/vpc/[^/]+/.destroy: destroy-instances' "$output"
     assert_matches 'instances/[^/]+/.refresh: refresh-network/vpc' "$output"
+}
+
+test_extra_deps_path_normalization() {
+    cd example/
+    local output original original_readme
+    # Preserve existing edits. Unregister cleanup when it runs so it cannot leak into the runner.
+    original=$(< common/tags.json)
+    original_readme=$(< ../README.md)
+    trap 'trap - RETURN; rm -f common/tags.json; printf "%s\n" "$original" > common/tags.json; printf "%s\n" "$original_readme" > ../README.md' RETURN
+
+    # Use stacks.mk directly so example/Makefile adds no implicit extra dependencies.
+    # Skip dependency-file generation: these assertions only exercise Git-based detection.
+    local -a make_cmd=(make --no-print-directory -f ../stacks.mk
+        -o .deps/dev.d ENV=dev DIFF_BASE=HEAD changed)
+
+    # 1) A declared dependency alone must not mark any stacks changed.
+    output=$("${make_cmd[@]}" EXTRA_DEPS=../example/common/./tags.json)
+    assert_same '(no changed stacks detected)' "$output"
+
+    # 2) A changed root dependency selects every stack, with or without redundant ./ and ../.
+    echo '{"changed":true}' > common/tags.json
+    output=$("${make_cmd[@]}" EXTRA_DEPS=common/tags.json)
+    assert_same 'instances network/vpc org' "$output"
+    output=$("${make_cmd[@]}" EXTRA_DEPS=../example/common/./tags.json)
+    assert_same 'instances network/vpc org' "$output"
+
+    # 3) Per-stack dependencies select only their owner, for relative and absolute paths.
+    output=$("${make_cmd[@]}" EXTRA_DEPS_instances=../example/common/./tags.json)
+    assert_same 'instances' "$output"
+    output=$("${make_cmd[@]}" "EXTRA_DEPS_org=$PWD/common/../common/tags.json")
+    assert_same 'org' "$output"
+
+    # 4) Replace the tracked file with a symlink. Git reports common/tags.json as changed,
+    #    so matching must preserve that name rather than resolve it to org/config.json.
+    #    Check both per-stack and root declarations.
+    rm common/tags.json
+    ln -s ../org/config.json common/tags.json
+    output=$("${make_cmd[@]}" EXTRA_DEPS_instances=./common/tags.json)
+    assert_same 'instances' "$output"
+    output=$("${make_cmd[@]}" EXTRA_DEPS=./common/tags.json)
+    assert_same 'instances network/vpc org' "$output"
+
+    # 5) A dependency genuinely outside example/ must also be detected.
+    #    ../README.md lives one level up; unlike ../example/..., it does not point back inside.
+    printf '\nExtra dependency regression input.\n' >> ../README.md
+    output=$("${make_cmd[@]}" EXTRA_DEPS=../README.md)
+    assert_same 'instances network/vpc org' "$output"
+    output=$("${make_cmd[@]}" EXTRA_DEPS_instances=../README.md)
+    assert_same 'instances' "$output"
 }
